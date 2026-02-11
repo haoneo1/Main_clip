@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "LN_prompt (GPU1, workers=12)",
+      "type": "python",
+      "request": "launch",
+      "python": "/home/mig/miniconda3/envs/pyenv/bin/python",
+      "module": "experiments.LN_prompt",
+      "args": [
+        "--exp_name=LN_prompt",
+        "--n_prompts=3",
+        "--clip_LN_lr=1e-6",
+        "--prompt_lr=1e-4",
+        "--batch_size=4",
+        "--workers=4"
+      ],
+      "cwd": "/home/mig/Documents/SBIR/Main_clip",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "subProcess": true,
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "CUDA_VISIBLE_DEVICES": "0"
+      }
+    }
+  ]
+}
