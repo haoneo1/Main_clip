@@ -22,6 +22,38 @@ def freeze_all_but_bn(m):
             m.bias.requires_grad_(False)
 
 
+def _to_key_list(category):
+    """
+    把 category 统一规整为 Python 的 str list（可比较 key）。
+    支持: torch.Tensor / np.ndarray / list / tuple / 单个 python 标量 / 单个字符串
+    """
+    if isinstance(category, torch.Tensor):
+        c = category.detach().cpu()
+        if c.numel() == 1:
+            return [str(c.item())]
+        return [str(v) for v in c.view(-1).tolist()]
+
+    if isinstance(category, np.ndarray):
+        c = category
+        if c.size == 1:
+            return [str(c.item())]
+        return [str(v) for v in c.reshape(-1).tolist()]
+
+    if isinstance(category, (list, tuple)):
+        out = []
+        for x in category:
+            if isinstance(x, torch.Tensor):
+                xx = x.detach().cpu()
+                out.append(str(xx.item()) if xx.numel() == 1 else str(xx.view(-1)[0].item()))
+            elif isinstance(x, np.ndarray):
+                out.append(str(x.item()) if x.size == 1 else str(x.reshape(-1)[0]))
+            else:
+                out.append(str(x))
+        return out
+
+    return [str(category)]
+
+
 class Model(pl.LightningModule):
     def __init__(self):
         super().__init__()
@@ -30,7 +62,6 @@ class Model(pl.LightningModule):
 
         # IMPORTANT:
         # clip.load 内部会使用 self.device；Lightning 会在后续把 module move 到 GPU。
-        # 这里保持你原有写法不变（不改名字/结构）。
         self.clip, _ = clip.load("ViT-B/32", device=self.device)
         self.clip.apply(freeze_all_but_bn)
 
@@ -38,6 +69,7 @@ class Model(pl.LightningModule):
         self.sk_prompt = nn.Parameter(torch.randn(self.opts.n_prompts, self.opts.prompt_dim))
         self.img_prompt = nn.Parameter(torch.randn(self.opts.n_prompts, self.opts.prompt_dim))
 
+        # Triplet loss
         self.distance_fn = lambda x, y: 1.0 - F.cosine_similarity(x, y)
         self.loss_fn = nn.TripletMarginWithDistanceLoss(
             distance_function=self.distance_fn, margin=0.2
@@ -45,7 +77,7 @@ class Model(pl.LightningModule):
 
         self.best_metric = -1e3
 
-        # --- Lightning 2.x validation aggregation buffers (replaces validation_epoch_end) ---
+        # --- Lightning 2.x validation aggregation buffers ---
         self._val_query_feats = []
         self._val_gallery_feats = []
         self._val_categories = []
@@ -72,6 +104,7 @@ class Model(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+
         img_feat = self.forward(img_tensor, dtype="image")
         sk_feat = self.forward(sk_tensor, dtype="sketch")
         neg_feat = self.forward(neg_tensor, dtype="image")
@@ -80,7 +113,6 @@ class Model(pl.LightningModule):
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
-    # --------- Lightning 2.x compatible validation aggregation (do not keep validation_epoch_end) ---------
     def on_validation_epoch_start(self):
         self._val_query_feats = []
         self._val_gallery_feats = []
@@ -88,69 +120,80 @@ class Model(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+
         img_feat = self.forward(img_tensor, dtype="image")
         sk_feat = self.forward(sk_tensor, dtype="sketch")
         neg_feat = self.forward(neg_tensor, dtype="image")
 
         loss = self.loss_fn(sk_feat, img_feat, neg_feat)
 
-        # 名字不改：val_loss
-        # on_epoch=True 确保 ModelCheckpoint(monitor='val_loss') 监控到 epoch-level 指标
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        # 缓存特征与类别，用于 epoch 末计算 mAP
-        # 放到 CPU，避免验证集大时占用过多 GPU 显存
+        # 缓存到 CPU
         self._val_query_feats.append(sk_feat.detach().cpu())
         self._val_gallery_feats.append(img_feat.detach().cpu())
 
-        # category 可能是 list/tuple 或 tensor；统一扁平化保存
-        if isinstance(category, (list, tuple)):
-            self._val_categories.extend(list(category))
-        else:
-            try:
-                self._val_categories.extend(category.detach().cpu().tolist())
-            except Exception:
-                self._val_categories.append(category)
+        # 关键：把 category 规整为 str list
+        cats = _to_key_list(category)
+        self._val_categories.extend(cats)
 
         return loss
 
     def on_validation_epoch_end(self):
-        Len = len(self._val_query_feats)
-        if Len == 0:
+        if len(self._val_query_feats) == 0:
             return
 
-        query_feat_all = torch.cat(self._val_query_feats, dim=0)      # CPU
-        gallery_feat_all = torch.cat(self._val_gallery_feats, dim=0)  # CPU
-        all_category = np.array(self._val_categories)
+        query_feat_all = torch.cat(self._val_query_feats, dim=0)      # [Q, D] CPU
+        gallery_feat_all = torch.cat(self._val_gallery_feats, dim=0)  # [G, D] CPU
 
-        # mAP category-level SBIR Metrics
-        gallery = gallery_feat_all
-        ap = torch.zeros(len(query_feat_all), dtype=torch.float32)
+        # category 统一为 str array（避免 dtype=object 乱套）
+        all_category = np.asarray(self._val_categories, dtype=str)
 
-        for idx, sk_feat in enumerate(query_feat_all):
-            category = all_category[idx]
-            distance = -1 * self.distance_fn(sk_feat.unsqueeze(0), gallery)  # CPU tensor [N]
+        # --- 诊断：NaN ---
+        q_nan = torch.isnan(query_feat_all).any().item()
+        g_nan = torch.isnan(gallery_feat_all).any().item()
+        if q_nan or g_nan:
+            print(f"[WARN] NaN detected in feats: query_nan={q_nan}, gallery_nan={g_nan}")
 
-            target = torch.zeros(len(gallery), dtype=torch.bool)
-            target[np.where(all_category == category)] = True
+        # --- normalize ---
+        query = F.normalize(query_feat_all, dim=1)
+        gallery = F.normalize(gallery_feat_all, dim=1)
 
-            ap[idx] = retrieval_average_precision(distance, target)
+        # --- 诊断：每个 query 在 gallery 里的正样本数 ---
+        pos_counts = []
+        for i in range(len(all_category)):
+            pos_counts.append(int(np.sum(all_category == all_category[i])))
+        print(
+            f"[VAL] pos_count min/mean/max = {min(pos_counts)}/{(sum(pos_counts)/len(pos_counts)):.2f}/{max(pos_counts)}"
+        )
 
-        mAP = torch.mean(ap)
+        # --- mAP ---
+        ap = torch.zeros(len(query), dtype=torch.float32)
 
-        # 名字不改：mAP
+        for idx in range(len(query)):
+            # cosine similarity score: larger = more similar
+            scores = torch.matmul(gallery, query[idx])  # [G]
+
+            # target 用字符串比较得到 numpy bool，再转 torch.bool
+            target_np = (all_category == all_category[idx])
+            target = torch.from_numpy(target_np).to(dtype=torch.bool)
+
+            if target.sum().item() == 0:
+                ap[idx] = 0.0
+                continue
+
+            ap[idx] = retrieval_average_precision(scores, target)
+
+        mAP = ap.mean()
+
         self.log("mAP", mAP, on_step=False, on_epoch=True, prog_bar=True)
-
-        # 如果你的 ModelCheckpoint filename 里用了 {top10:.2f} 且你“不改名字”，
-        # 这里额外 log 一个 top10，令 top10 == mAP，避免保存 checkpoint 时缺字段报错
         self.log("top10", mAP, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.global_step > 0:
-            self.best_metric = self.best_metric if (self.best_metric > mAP.item()) else mAP.item()
+            self.best_metric = max(self.best_metric, float(mAP.item()))
 
-        print("mAP: {}, Best mAP: {}".format(mAP.item(), self.best_metric))
+        print(f"[VAL] mAP: {mAP.item():.6f}, Best mAP: {self.best_metric:.6f}")
 
-        # 清理缓存
         self._val_query_feats.clear()
         self._val_gallery_feats.clear()
         self._val_categories.clear()

@@ -5,31 +5,31 @@ import torch
 from torchvision import transforms
 from PIL import Image, ImageOps
 
-# unseen_classes = [
-#     "bat",
-#     "cabin",
-#     "cow",
-#     "dolphin",
-#     "door",
-#     "giraffe",
-#     "helicopter",
-#     "mouse",
-#     "pear",
-#     "raccoon",
-#     "rhinoceros",
-#     "saw",
-#     "scissors",
-#     "seagull",
-#     "skyscraper",
-#     "songbird",
-#     "sword",
-#     "tree",
-#     "wheelchair",
-#     "windmill",
-#     "window",
-# ]
+unseen_classes = [
+    "bat",
+    "cabin",
+    "cow",
+    "dolphin",
+    "door",
+    "giraffe",
+    "helicopter",
+    "mouse",
+    "pear",
+    "raccoon",
+    "rhinoceros",
+    "saw",
+    "scissors",
+    "seagull",
+    "skyscraper",
+    "songbird",
+    "sword",
+    "tree",
+    "wheelchair",
+    "windmill",
+    "window",
+]
 
-unseen_classes = ["airplane"]
+# unseen_classes = ["airplane"]
 
 class Sketchy(torch.utils.data.Dataset):
 

@@ -41,7 +41,7 @@ if __name__ == '__main__':
         max_epochs=20,
         benchmark=True,
         logger=logger,
-        check_val_every_n_epoch=5,
+        check_val_every_n_epoch=1,
         callbacks=[checkpoint_callback]
     )
 
