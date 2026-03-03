@@ -1,0 +1,13 @@
+saved_models/
+tb_logs/
+runs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.npy
+*.npz
+*.zip
+*.tar
+*.tar.gz
