@@ -1,55 +1,37 @@
 import os
 import glob
+import random
 import numpy as np
 import torch
 from torchvision import transforms
 from PIL import Image, ImageOps
 
 unseen_classes = [
-    "bat",
-    "cabin",
-    "cow",
-    "dolphin",
-    "door",
-    "giraffe",
-    "helicopter",
-    "mouse",
-    "pear",
-    "raccoon",
-    "rhinoceros",
-    "saw",
-    "scissors",
-    "seagull",
-    "skyscraper",
-    "songbird",
-    "sword",
-    "tree",
-    "wheelchair",
-    "windmill",
-    "window",
+    "bat", "cabin", "cow", "dolphin", "door", "giraffe", "helicopter",
+    "mouse", "pear", "raccoon", "rhinoceros", "saw", "scissors",
+    "seagull", "skyscraper", "songbird", "sword", "tree",
+    "wheelchair", "windmill", "window",
 ]
 
 
-class PhotoOnlyJEPADataset(torch.utils.data.Dataset):
+class MultiModalJEPADataset(torch.utils.data.Dataset):
     """
-    只用于 photo-only JEPA 预训练：
-    - 只读取 photo
-    - 只使用 base classes（默认 mode='train'）
-    - 每次返回同一张 photo 的两个增强视图
+    JEPA pretraining dataset with both photo and sketch.
+    Each sample returns:
+        img_view1, img_view2, sk_view1, sk_view2, category
     """
 
-    def __init__(self, opts, transform_view1, transform_view2=None, mode='train', return_orig=False):
+    def __init__(self, opts, transform_img, transform_sk=None, mode='train', return_orig=False):
         self.opts = opts
-        self.transform_view1 = transform_view1
-        self.transform_view2 = transform_view2 if transform_view2 is not None else transform_view1
+        self.transform_img = transform_img
+        self.transform_sk = transform_sk if transform_sk is not None else transform_img
         self.return_orig = return_orig
 
-        # 读取所有类别（从 sketch 目录读类别名，与你原来的 retrieval 保持一致）
         self.all_categories = os.listdir(os.path.join(self.opts.data_dir, 'sketch'))
         if '.ipynb_checkpoints' in self.all_categories:
             self.all_categories.remove('.ipynb_checkpoints')
+        self.all_categories = sorted(self.all_categories)
 
-        # 类别划分逻辑与原始 Sketchy 尽量保持一致
         if self.opts.data_split > 0:
             np.random.shuffle(self.all_categories)
             split_idx = int(len(self.all_categories) * self.opts.data_split)
@@ -58,54 +40,67 @@ class PhotoOnlyJEPADataset(torch.utils.data.Dataset):
             else:
                 self.all_categories = self.all_categories[split_idx:]
         else:
-            # 严格 ZS：train 只用 base classes；val/test 才用 unseen
             if mode == 'train':
-                self.all_categories = list(set(self.all_categories) - set(unseen_classes))
+                self.all_categories = sorted(list(set(self.all_categories) - set(unseen_classes)))
             else:
-                self.all_categories = unseen_classes
+                self.all_categories = sorted(unseen_classes)
 
-        self.all_photos_path = []
+        self.photo_dict = {}
+        self.sketch_dict = {}
+
+        valid_categories = []
         for category in self.all_categories:
-            self.all_photos_path.extend(
-                glob.glob(os.path.join(self.opts.data_dir, 'photo', category, '*.jpg'))
-            )
+            photo_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'photo', category, '*.jpg')))
+            sketch_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'sketch', category, '*.png')))
+            if len(sketch_list) == 0:
+                sketch_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'sketch', category, '*.jpg')))
 
-        self.all_photos_path = sorted(self.all_photos_path)
+            if len(photo_list) > 0 and len(sketch_list) > 0:
+                self.photo_dict[category] = photo_list
+                self.sketch_dict[category] = sketch_list
+                valid_categories.append(category)
+
+        self.all_categories = valid_categories
+
+        # length by photos for enough iterations; category sampled by index
+        self.length = sum(len(self.photo_dict[c]) for c in self.all_categories)
 
     def __len__(self):
-        return len(self.all_photos_path)
+        return self.length
 
-    def __getitem__(self, index):
-        img_path = self.all_photos_path[index]
-        category = img_path.split(os.path.sep)[-2]
-        filename = os.path.basename(img_path)
-
-        img_data = ImageOps.pad(
-            Image.open(img_path).convert('RGB'),
+    def _load_and_pad(self, path):
+        return ImageOps.pad(
+            Image.open(path).convert('RGB'),
             size=(self.opts.max_size, self.opts.max_size)
         )
 
-        # 同一张图，两次随机增强
-        img_view1 = self.transform_view1(img_data)
-        img_view2 = self.transform_view2(img_data)
+    def __getitem__(self, index):
+        category = self.all_categories[index % len(self.all_categories)]
+
+        img_path = random.choice(self.photo_dict[category])
+        sk_path = random.choice(self.sketch_dict[category])
+
+        img = self._load_and_pad(img_path)
+        sk = self._load_and_pad(sk_path)
+
+        img_view1 = self.transform_img(img)
+        img_view2 = self.transform_img(img)
+
+        sk_view1 = self.transform_sk(sk)
+        sk_view2 = self.transform_sk(sk)
 
         if self.return_orig:
-            return img_view1, img_view2, category, filename, img_data
+            return img_view1, img_view2, sk_view1, sk_view2, category, img, sk
         else:
-            return img_view1, img_view2, category, filename
+            return img_view1, img_view2, sk_view1, sk_view2, category
 
     @staticmethod
     def data_transform(opts):
-        """
-        给 JEPA 预训练用的数据增强。
-        注意：必须带随机性，否则同一张图两次输出完全一样，JEPA 就没意义了。
-        建议先用“温和增强”，不要太激进。
-        """
         transform = transforms.Compose([
             transforms.Resize((opts.max_size, opts.max_size)),
             transforms.RandomResizedCrop(
                 size=opts.max_size,
-                scale=(0.8, 1.0),
+                scale=(0.7, 1.0),
                 ratio=(0.9, 1.1)
             ),
             transforms.RandomHorizontalFlip(p=0.5),
@@ -124,20 +119,3 @@ class PhotoOnlyJEPADataset(torch.utils.data.Dataset):
             )
         ])
         return transform
-
-
-if __name__ == '__main__':
-    from experiments.options import opts
-    import tqdm
-
-    transform = PhotoOnlyJEPADataset.data_transform(opts)
-    dataset = PhotoOnlyJEPADataset(opts, transform, mode='train', return_orig=True)
-
-    print("num photos:", len(dataset))
-    print("num categories:", len(dataset.all_categories))
-    print("categories:", dataset.all_categories[:10])
-
-    for data in tqdm.tqdm(dataset):
-        img_view1, img_view2, category, filename, img_data = data
-        # 这里只是测试 dataset 是否能正常跑通
-        break
