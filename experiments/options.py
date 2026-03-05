@@ -67,7 +67,7 @@ parser.add_argument('--best_metric_init', type=float, default=-1e3) #用来存�
 # ----------------------
 # CClip text setting
 # ----------------------
-parser.add_argument('--use_clip_cls', type=str2bool, default=True)
+parser.add_argument('--use_clip_cls', type=str2bool, default=False)
 
 parser.add_argument('--cls_tau', type=float, default=0.07)
 parser.add_argument('--use_clip_logit_scale', type=str2bool, default=True)
