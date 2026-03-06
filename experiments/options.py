@@ -31,8 +31,8 @@ parser.add_argument(
 # 常规设置
 # ----------------------
 
-parser.add_argument('--data_dir', type=str, default='/home/mig/Documents/SBIR_Data/Sketchy/')
-#parser.add_argument('--data_dir', type=str, default='/home/bingxing2/home/scx9951/SBIR_Data/Sketchy/')#超算数据路径
+#parser.add_argument('--data_dir', type=str, default='/home/mig/Documents/SBIR_Data/Sketchy/')
+parser.add_argument('--data_dir', type=str, default='/home/bingxing2/home/scx9951/SBIR_Data/Sketchy/')#超算数据路径
 parser.add_argument('--exp_name', type=str, default='SSL_ph+sk_jepa+reg')
 parser.add_argument('--max_size', type=int, default=224)
 parser.add_argument('--seed', type=int, default=42)
