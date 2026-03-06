@@ -14,6 +14,27 @@ unseen_classes = [
 ]
 
 
+class PadToSquare:
+    """
+    Pad PIL image to square while keeping aspect ratio.
+    """
+    def __init__(self, fill=(255, 255, 255)):
+        self.fill = fill
+
+    def __call__(self, img):
+        w, h = img.size
+        max_side = max(w, h)
+        pad_left = (max_side - w) // 2
+        pad_right = max_side - w - pad_left
+        pad_top = (max_side - h) // 2
+        pad_bottom = max_side - h - pad_top
+        return transforms.functional.pad(
+            img,
+            padding=(pad_left, pad_top, pad_right, pad_bottom),
+            fill=self.fill
+        )
+
+
 class MultiModalJEPADataset(torch.utils.data.Dataset):
     """
     JEPA pretraining dataset with both photo and sketch.
@@ -27,11 +48,13 @@ class MultiModalJEPADataset(torch.utils.data.Dataset):
         self.transform_sk = transform_sk if transform_sk is not None else transform_img
         self.return_orig = return_orig
 
-        self.all_categories = os.listdir(os.path.join(self.opts.data_dir, 'sketch'))
+        sketch_root = os.path.join(self.opts.data_dir, 'sketch')
+        self.all_categories = os.listdir(sketch_root)
         if '.ipynb_checkpoints' in self.all_categories:
             self.all_categories.remove('.ipynb_checkpoints')
         self.all_categories = sorted(self.all_categories)
 
+        # split categories
         if self.opts.data_split > 0:
             np.random.shuffle(self.all_categories)
             split_idx = int(len(self.all_categories) * self.opts.data_split)
@@ -47,41 +70,42 @@ class MultiModalJEPADataset(torch.utils.data.Dataset):
 
         self.photo_dict = {}
         self.sketch_dict = {}
-
         valid_categories = []
+
         for category in self.all_categories:
             photo_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'photo', category, '*.jpg')))
+            photo_list += sorted(glob.glob(os.path.join(self.opts.data_dir, 'photo', category, '*.png')))
+
             sketch_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'sketch', category, '*.png')))
-            if len(sketch_list) == 0:
-                sketch_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'sketch', category, '*.jpg')))
+            sketch_list += sorted(glob.glob(os.path.join(self.opts.data_dir, 'sketch', category, '*.jpg')))
 
             if len(photo_list) > 0 and len(sketch_list) > 0:
                 self.photo_dict[category] = photo_list
                 self.sketch_dict[category] = sketch_list
                 valid_categories.append(category)
 
-        self.all_categories = valid_categories
+        self.all_categories = sorted(valid_categories)
 
-        # length by photos for enough iterations; category sampled by index
-        self.length = sum(len(self.photo_dict[c]) for c in self.all_categories)
+        # build explicit sample list: each photo is one anchor sample
+        self.samples = []
+        for category in self.all_categories:
+            for img_path in self.photo_dict[category]:
+                self.samples.append((category, img_path))
+
+        self.length = len(self.samples)
 
     def __len__(self):
         return self.length
 
-    def _load_and_pad(self, path):
-        return ImageOps.pad(
-            Image.open(path).convert('RGB'),
-            size=(self.opts.max_size, self.opts.max_size)
-        )
+    def _load_rgb(self, path):
+        return Image.open(path).convert('RGB')
 
     def __getitem__(self, index):
-        category = self.all_categories[index % len(self.all_categories)]
-
-        img_path = random.choice(self.photo_dict[category])
+        category, img_path = self.samples[index]
         sk_path = random.choice(self.sketch_dict[category])
 
-        img = self._load_and_pad(img_path)
-        sk = self._load_and_pad(sk_path)
+        img = self._load_rgb(img_path)
+        sk = self._load_rgb(sk_path)
 
         img_view1 = self.transform_img(img)
         img_view2 = self.transform_img(img)
@@ -97,7 +121,7 @@ class MultiModalJEPADataset(torch.utils.data.Dataset):
     @staticmethod
     def data_transform(opts):
         transform = transforms.Compose([
-            transforms.Resize((opts.max_size, opts.max_size)),
+            PadToSquare(fill=(255, 255, 255)),
             transforms.RandomResizedCrop(
                 size=opts.max_size,
                 scale=(0.7, 1.0),
