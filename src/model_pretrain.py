@@ -23,7 +23,6 @@ class PretrainModel(BasePromptModel):
 
         proj_dim = getattr(self.opts, "jepa_proj_dim", self.feat_dim)
 
-        # projector only, no predictor
         self.projector = nn.Sequential(
             nn.LayerNorm(self.feat_dim),
             nn.Linear(self.feat_dim, hidden_dim),
@@ -33,16 +32,11 @@ class PretrainModel(BasePromptModel):
 
         self.lambda_jepa = getattr(self.opts, "lambda_jepa", 1.0)
         self.lambda_reg = getattr(self.opts, "lambda_reg", 0.1)
-
-        # optional weights for different alignments
         self.lambda_intra = getattr(self.opts, "lambda_intra", 1.0)
         self.lambda_cross = getattr(self.opts, "lambda_cross", 1.0)
 
         self.proj_dim = proj_dim
 
-    # -------------------------
-    # helpers
-    # -------------------------
     def _project(self, z):
         return self.projector(z)
 
@@ -57,17 +51,10 @@ class PretrainModel(BasePromptModel):
         return (1.0 - F.cosine_similarity(p1, p2, dim=-1)).mean()
 
     def _variance_regularizer(self, x, eps=1e-4):
-        """
-        VICReg-style variance floor regularizer.
-        Not official SIGReg, but a simple anti-collapse surrogate.
-        """
         std = torch.sqrt(x.var(dim=0, unbiased=False) + eps)
         return torch.mean(F.relu(1.0 - std))
 
     def _covariance_regularizer(self, x):
-        """
-        Encourage decorrelation across dimensions.
-        """
         x = x - x.mean(dim=0, keepdim=True)
         n = x.shape[0]
         if n <= 1:
@@ -77,33 +64,23 @@ class PretrainModel(BasePromptModel):
         return (off_diag.pow(2).sum() / x.shape[1])
 
     def _regularization_loss(self, p_all):
-        """
-        Practical surrogate for SIGReg if you don't want to add external lejepa pkg yet.
-        """
         var_loss = self._variance_regularizer(p_all)
         cov_loss = self._covariance_regularizer(p_all)
         return var_loss + cov_loss
 
-    # -------------------------
-    # multi-modal LeJEPA-style loss
-    # -------------------------
     def _multimodal_jepa_loss(self, img_view1, img_view2, sk_view1, sk_view2):
-        # backbone features
         z_img1 = self.encode_image_branch(img_view1)
         z_img2 = self.encode_image_branch(img_view2)
         z_sk1 = self.encode_sketch_branch(sk_view1)
         z_sk2 = self.encode_sketch_branch(sk_view2)
 
-        # projection space
         p_img1 = self._project(z_img1)
         p_img2 = self._project(z_img2)
         p_sk1 = self._project(z_sk1)
         p_sk2 = self._project(z_sk2)
 
-        # shared latent center
         center = (p_img1 + p_img2 + p_sk1 + p_sk2) / 4.0
 
-        # center-based JEPA loss
         center_loss = (
             self._cosine_to_center(p_img1, center) +
             self._cosine_to_center(p_img2, center) +
@@ -111,13 +88,11 @@ class PretrainModel(BasePromptModel):
             self._cosine_to_center(p_sk2, center)
         ) / 4.0
 
-        # optional explicit intra-modal consistency
         intra_loss = (
             self._pair_cosine_loss(p_img1, p_img2) +
             self._pair_cosine_loss(p_sk1, p_sk2)
         ) / 2.0
 
-        # optional explicit cross-modal consistency
         cross_loss = (
             self._pair_cosine_loss(p_img1, p_sk1) +
             self._pair_cosine_loss(p_img1, p_sk2) +
@@ -127,12 +102,11 @@ class PretrainModel(BasePromptModel):
 
         jepa_loss = center_loss + self.lambda_intra * intra_loss + self.lambda_cross * cross_loss
 
-        # anti-collapse regularization
         p_all = torch.cat([p_img1, p_img2, p_sk1, p_sk2], dim=0)
         reg_loss = self._regularization_loss(p_all)
 
         total_loss = self.lambda_jepa * jepa_loss + self.lambda_reg * reg_loss
-        #total_loss = self.lambda_jepa * jepa_loss
+
         stats = {
             "z_img1": z_img1,
             "z_img2": z_img2,
@@ -162,6 +136,12 @@ class PretrainModel(BasePromptModel):
 
     def training_step(self, batch, batch_idx):
         img_view1, img_view2, sk_view1, sk_view2 = batch[:4]
+
+        # channels_last 只对 4D image tensors 有意义
+        img_view1 = img_view1.contiguous(memory_format=torch.channels_last)
+        img_view2 = img_view2.contiguous(memory_format=torch.channels_last)
+        sk_view1 = sk_view1.contiguous(memory_format=torch.channels_last)
+        sk_view2 = sk_view2.contiguous(memory_format=torch.channels_last)
 
         loss, stats = self._multimodal_jepa_loss(
             img_view1, img_view2, sk_view1, sk_view2
