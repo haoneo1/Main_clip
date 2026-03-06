@@ -36,7 +36,7 @@ parser.add_argument('--data_dir', type=str, default='/home/bingxing2/home/scx995
 parser.add_argument('--exp_name', type=str, default='SSL_ph+sk_jepa+reg')
 parser.add_argument('--max_size', type=int, default=224)
 parser.add_argument('--seed', type=int, default=42)
-parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--batch_size', type=int, default=256)
 parser.add_argument('--workers', type=int, default=2)
 parser.add_argument('--max_epochs', type=int, default=50)
 
