@@ -1,0 +1,30 @@
+cuda-12.1 loaded successful
+gcc-11.3.0 loaded successful
+========== JOB START ==========
+Job ID      : 1151360
+Node        : paraai-n32-h-01-agent-17
+Work Dir    : /home/bingxing2/home/scx9951/Main_clip
+Start Time  : Fri Mar  6 16:27:26 CST 2026
+Python Path : /home/bingxing2/home/scx9951/.conda/envs/py39_env/bin/python
+Python Ver  : Python 3.9.23
+Conda Env   : py39_env
+===============================
+[JEPA PRETRAIN] num samples: 62549
+[JEPA PRETRAIN] num categories: 104
+[JEPA PRETRAIN] first 10 categories: ['airplane', 'alarm_clock', 'ant', 'ape', 'apple', 'armor', 'axe', 'banana', 'bear', 'bee']
+[JEPA PRETRAIN] save_dir: /home/bingxing2/home/scx9951/SBIR_Data/saved_models/SSL_ph+sk_jepa+reg_pretrain
+[JEPA PRETRAIN] batch_size: 256
+[JEPA PRETRAIN] workers: 32
+[JEPA PRETRAIN] beginning multimodal LeJEPA-like pretraining...
+Training: |          | 0/? [00:00<?, ?it/s]Training: |          | 0/? [00:00<?, ?it/s]Epoch 0:   0%|          | 0/244 [00:00<?, ?it/s]Epoch 0:   0%|          | 1/244 [00:15<1:01:07,  0.07it/s]Epoch 0:   0%|          | 1/244 [00:15<1:01:08,  0.07it/s, v_num=3, train_loss_step=0.610]Epoch 0:   0%|          | 1/244 [00:20<1:22:21,  0.05it/s, v_num=3, train_loss_step=0.610]
+
+
+
+============ Job 1151360 Performance Details ============
+JobID: 1151360
+User: scx9951
+Nodes、GPU: N/A
+Time Range: 2026-03-06 16:27:25 - 2026-03-06 16:28:12
+Running time: 0d0H0M47S
+Get GPU mapping information failed，can not perform performance query。
+=========================================================

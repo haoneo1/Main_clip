@@ -1,0 +1,167 @@
+/home/bingxing2/home/scx9951/Main_clip/src/clip/clip.py:6: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  from pkg_resources import packaging
+[rank: 0] Seed set to 42
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/lightning_fabric/plugins/environments/slurm.py:204: The `srun` command is available on your system but is not used. HINT: If your intention is to run Lightning on SLURM, prepend your python command with `srun` like so: srun python /home/bingxing2/home/scx9951/Main_clip/experiments/t ...
+Using bfloat16 Automatic Mixed Precision (AMP)
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/utilities/model_summary/model_summary.py:242: Precision bf16-mixed is not supported by the model summary.  Estimated model size in MB will not be accurate. Using 32 bits instead.
+
+  | Name         | Type       | Params | Mode  | FLOPs
+------------------------------------------------------------
+0 | clip         | CLIP       | 151 M  | train | 0    
+1 | projector    | Sequential | 526 K  | train | 0    
+  | other params | n/a        | 4.6 K  | n/a   | n/a  
+------------------------------------------------------------
+32.0 M    Trainable params
+119 M     Non-trainable params
+151 M     Total params
+607.233   Total estimated model params size (MB)
+232       Modules in train mode
+0         Modules in eval mode
+0         Total Flops
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torchvision/transforms/_functional_pil.py:113: RuntimeWarning: invalid value encountered in cast
+  np_h += np.array(hue_factor * 255).astype(np.uint8)
+/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/utilities/data.py:79: Trying to infer the `batch_size` from an ambiguous collection. The batch size we found is 256. To avoid any miscalculations, use `self.log(..., batch_size=batch_size)`.
+Exception in thread Thread-2:
+Traceback (most recent call last):
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/threading.py", line 980, in _bootstrap_inner
+    self.run()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/threading.py", line 917, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/_utils/pin_memory.py", line 55, in _pin_memory_loop
+    do_one_step()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/_utils/pin_memory.py", line 32, in do_one_step
+    r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/multiprocessing/queues.py", line 122, in get
+    return _ForkingPickler.loads(res)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/multiprocessing/reductions.py", line 496, in rebuild_storage_fd
+    fd = df.detach()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/multiprocessing/resource_sharer.py", line 57, in detach
+    with _resource_sharer.get_connection(self._id) as conn:
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/multiprocessing/resource_sharer.py", line 86, in get_connection
+    c = Client(address, authkey=process.current_process().authkey)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/multiprocessing/connection.py", line 502, in Client
+    c = SocketClient(address)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/multiprocessing/connection.py", line 630, in SocketClient
+    s.connect(address)
+ConnectionRefusedError: [Errno 111] Connection refused
+Traceback (most recent call last):
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1131, in _try_get_data
+    data = self._data_queue.get(timeout=timeout)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/queue.py", line 180, in get
+    self.not_empty.wait(remaining)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/threading.py", line 316, in wait
+    gotit = waiter.acquire(True, timeout)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/_utils/signal_handling.py", line 67, in handler
+    _error_if_any_worker_fails()
+RuntimeError: DataLoader worker (pid 3490687) is killed by signal: Killed. 
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/runpy.py", line 197, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/home/bingxing2/home/scx9951/Main_clip/experiments/train_pretrain.py", line 94, in <module>
+    trainer.fit(model, train_loader, ckpt_path=ckpt_path)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 584, in fit
+    call._call_and_handle_interrupt(
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/trainer/call.py", line 49, in _call_and_handle_interrupt
+    return trainer_fn(*args, **kwargs)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 630, in _fit_impl
+    self._run(model, ckpt_path=ckpt_path, weights_only=weights_only)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 1079, in _run
+    results = self._run_stage()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/trainer/trainer.py", line 1123, in _run_stage
+    self.fit_loop.run()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/loops/fit_loop.py", line 217, in run
+    self.advance()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/loops/fit_loop.py", line 465, in advance
+    self.epoch_loop.run(self._data_fetcher)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 153, in run
+    self.advance(data_fetcher)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/loops/training_epoch_loop.py", line 311, in advance
+    batch, _, __ = next(data_fetcher)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/loops/fetchers.py", line 134, in __next__
+    batch = super().__next__()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/loops/fetchers.py", line 61, in __next__
+    batch = next(self.iterator)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/utilities/combined_loader.py", line 341, in __next__
+    out = next(self._iterator)
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/pytorch_lightning/utilities/combined_loader.py", line 78, in __next__
+    out[i] = next(self.iterators[i])
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 630, in __next__
+    data = self._next_data()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1327, in _next_data
+    idx, data = self._get_data()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1283, in _get_data
+    success, data = self._try_get_data()
+  File "/home/bingxing2/home/scx9951/.conda/envs/py39_env/lib/python3.9/site-packages/torch/utils/data/dataloader.py", line 1144, in _try_get_data
+    raise RuntimeError(f'DataLoader worker (pid(s) {pids_str}) exited unexpectedly') from e
+RuntimeError: DataLoader worker (pid(s) 3490687) exited unexpectedly
+slurmstepd: error: Detected 4 oom-kill event(s) in StepId=1151360.batch. Some of your processes may have been killed by the cgroup out-of-memory handler.
