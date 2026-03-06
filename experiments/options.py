@@ -33,7 +33,7 @@ parser.add_argument(
 
 parser.add_argument('--data_dir', type=str, default='/home/mig/Documents/SBIR_Data/Sketchy/')
 #parser.add_argument('--data_dir', type=str, default='/home/bingxing2/home/scx9951/SBIR_Data/Sketchy/')#超算数据路径
-parser.add_argument('--exp_name', type=str, default='SSL_ph+sk_jepa')
+parser.add_argument('--exp_name', type=str, default='SSL_ph+sk_jepa+reg')
 parser.add_argument('--max_size', type=int, default=224)
 parser.add_argument('--seed', type=int, default=42)
 parser.add_argument('--batch_size', type=int, default=128)
@@ -69,7 +69,7 @@ parser.add_argument('--best_metric_init', type=float, default=-1e3) #用来存�
 # ----------------------
 # CClip text setting
 # ----------------------
-parser.add_argument('--use_clip_cls', type=str2bool, default=True)
+parser.add_argument('--use_clip_cls', type=str2bool, default=False)
 
 parser.add_argument('--cls_tau', type=float, default=0.07)
 parser.add_argument('--use_clip_logit_scale', type=str2bool, default=True)

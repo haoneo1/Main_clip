@@ -29,7 +29,7 @@ if __name__ == '__main__':
     # 2) Stage / experiment name
     # =========================
     opts.train_stage = "triplet_finetune"
-    opts.pretrain_ckpt = '/home/mig/Documents/SBIR_Data/saved_models/SSL_ph+sk_jepa_pretrain/last.ckpt'
+    opts.pretrain_ckpt = '/home/bingxing2/home/scx9951/SBIR_Data/saved_models/SSL_ph+sk_jepa_pretrain/last.ckpt'
 
     if not opts.exp_name.endswith("_finetune"):
         opts.exp_name = f"{opts.exp_name}_finetune"
@@ -37,7 +37,7 @@ if __name__ == '__main__':
     # =========================
     # 2.1) Save root / save dir
     # =========================
-    opts.save_root = "/home/mig/Documents/SBIR_Data/saved_models"
+    opts.save_root = "/home/bingxing2/home/scx9951/SBIR_Data/saved_models"
     save_dir = os.path.join(opts.save_root, opts.exp_name)
     os.makedirs(save_dir, exist_ok=True)
 

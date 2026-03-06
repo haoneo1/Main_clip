@@ -18,7 +18,7 @@ if __name__ == '__main__':
     if not opts.exp_name.endswith("_pretrain"):
         opts.exp_name = f"{opts.exp_name}_pretrain"
 
-    opts.save_root = "/home/mig/Documents/SBIR_Data/saved_models"
+    opts.save_root = "/home/bingxing2/home/scx9951/SBIR_Data/saved_models"
     save_dir = os.path.join(opts.save_root, opts.exp_name)
     os.makedirs(save_dir, exist_ok=True)
 

@@ -129,10 +129,10 @@ class PretrainModel(BasePromptModel):
 
         # anti-collapse regularization
         p_all = torch.cat([p_img1, p_img2, p_sk1, p_sk2], dim=0)
-        #reg_loss = self._regularization_loss(p_all)
+        reg_loss = self._regularization_loss(p_all)
 
-        #total_loss = self.lambda_jepa * jepa_loss + self.lambda_reg * reg_loss
-        total_loss = self.lambda_jepa * jepa_loss
+        total_loss = self.lambda_jepa * jepa_loss + self.lambda_reg * reg_loss
+        #total_loss = self.lambda_jepa * jepa_loss
         stats = {
             "z_img1": z_img1,
             "z_img2": z_img2,
@@ -145,7 +145,7 @@ class PretrainModel(BasePromptModel):
             "center_loss": center_loss.detach(),
             "intra_loss": intra_loss.detach(),
             "cross_loss": cross_loss.detach(),
-            ##"reg_loss": reg_loss.detach(),
+            "reg_loss": reg_loss.detach(),
         }
 
         return total_loss, stats
@@ -171,7 +171,7 @@ class PretrainModel(BasePromptModel):
         self.log("train_center_loss", stats["center_loss"], on_step=True, on_epoch=True, prog_bar=False)
         self.log("train_intra_loss", stats["intra_loss"], on_step=True, on_epoch=True, prog_bar=False)
         self.log("train_cross_loss", stats["cross_loss"], on_step=True, on_epoch=True, prog_bar=False)
-        #self.log("train_reg_loss", stats["reg_loss"], on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_reg_loss", stats["reg_loss"], on_step=True, on_epoch=True, prog_bar=False)
 
         self.log("train_img_feat_norm", stats["z_img1"].norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
         self.log("train_sk_feat_norm", stats["z_sk1"].norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
