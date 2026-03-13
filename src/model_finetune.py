@@ -16,6 +16,11 @@ class FinetuneModel(BasePromptModel):
             distance_function=self.distance_fn, margin=0.2
         )
 
+        # intra-domain weights (default safe)
+        self.lambda_ss = float(getattr(self.opts, "lambda_ss", 0.25))  # sketch-sketch
+        self.lambda_pp = float(getattr(self.opts, "lambda_pp", 0.25
+                                       ))  # photo-photo
+
         self.best_metric = self.opts.best_metric_init
 
         self.use_clip_cls = self.opts.use_clip_cls
@@ -84,7 +89,6 @@ class FinetuneModel(BasePromptModel):
             raise ValueError("use_clip_cls=True, but seen_class_names is empty.")
 
         text_features = []
-
         was_training = self.clip.training
         self.clip.eval()
 
@@ -151,25 +155,63 @@ class FinetuneModel(BasePromptModel):
         return optimizer
 
     def training_step(self, batch, batch_idx):
-        sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+        """
+        batch:
+          (sk, img_pos, img_neg, sk_pos, sk_neg, img_pos2, img_neg2, category, filename)
+        """
+        sk, img_pos, img_neg, sk_pos, sk_neg, img_pos2, img_neg2, category = batch[:8]
 
-        img_feat = self.forward(img_tensor, dtype="image")
-        sk_feat = self.forward(sk_tensor, dtype="sketch")
-        neg_feat = self.forward(neg_tensor, dtype="image")
+        B = sk.size(0)
+        use_ss = self.lambda_ss > 0.0
+        use_pp = self.lambda_pp > 0.0
 
-        triplet_loss = self.loss_fn(sk_feat, img_feat, neg_feat)
-        total_loss = triplet_loss
+        # ---- Encode sketches (anchor always), optionally sk_pos/sk_neg
+        if use_ss:
+            sk_all = torch.cat([sk, sk_pos, sk_neg], dim=0)  # [3B, C, H, W]
+            sk_feat_all = self.forward(sk_all, dtype="sketch")
+            sk_feat, sk_pos_feat, sk_neg_feat = torch.split(sk_feat_all, [B, B, B], dim=0)
+        else:
+            sk_feat = self.forward(sk, dtype="sketch")
+            sk_pos_feat = None
+            sk_neg_feat = None
 
-        self.log("train_triplet", triplet_loss, on_step=True, on_epoch=True, prog_bar=False)
+        # ---- Encode images (pos/neg always), optionally img_pos2/img_neg2
+        if use_pp:
+            img_all = torch.cat([img_pos, img_neg, img_pos2, img_neg2], dim=0)  # [4B, C, H, W]
+            img_feat_all = self.forward(img_all, dtype="image")
+            img_pos_feat, img_neg_feat, img_pos2_feat, img_neg2_feat = torch.split(img_feat_all, [B, B, B, B], dim=0)
+        else:
+            img_all = torch.cat([img_pos, img_neg], dim=0)  # [2B, C, H, W]
+            img_feat_all = self.forward(img_all, dtype="image")
+            img_pos_feat, img_neg_feat = torch.split(img_feat_all, [B, B], dim=0)
+            img_pos2_feat = None
+            img_neg2_feat = None
 
+        # ---- Triplet losses
+        loss_sp = self.loss_fn(sk_feat, img_pos_feat, img_neg_feat)  # cross: sk -> photo
+        total_loss = loss_sp
+
+        self.log("train_triplet_sp", loss_sp, on_step=True, on_epoch=True, prog_bar=False)
+
+        if use_ss:
+            loss_ss = self.loss_fn(sk_feat, sk_pos_feat, sk_neg_feat)  # sketch intra
+            total_loss = total_loss + self.lambda_ss * loss_ss
+            self.log("train_triplet_ss", loss_ss, on_step=True, on_epoch=True, prog_bar=False)
+
+        if use_pp:
+            loss_pp = self.loss_fn(img_pos_feat, img_pos2_feat, img_neg2_feat)  # photo intra
+            total_loss = total_loss + self.lambda_pp * loss_pp
+            self.log("train_triplet_pp", loss_pp, on_step=True, on_epoch=True, prog_bar=False)
+
+        # ---- Optional CLIP-text classification auxiliary loss (unchanged)
         if self.use_clip_cls:
             labels = self._category_to_label_tensor(category)
 
             sk_cls_loss, _, sk_acc = self._clip_text_cls_loss(sk_feat, labels)
-            img_cls_loss, _, img_acc = self._clip_text_cls_loss(img_feat, labels)
+            img_cls_loss, _, img_acc = self._clip_text_cls_loss(img_pos_feat, labels)
 
             cls_loss = sk_cls_loss + img_cls_loss
-            total_loss = triplet_loss + self.lambda_cls * cls_loss
+            total_loss = total_loss + self.lambda_cls * cls_loss
 
             self.log("train_cls_sk", sk_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
             self.log("train_cls_img", img_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
@@ -186,15 +228,26 @@ class FinetuneModel(BasePromptModel):
         self._val_categories = []
 
     def validation_step(self, batch, batch_idx):
-        sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+        """
+        为了保持你原来的评估协议：mAP 仍然用 sketch query vs photo gallery
+        val_loss 也只算 cross-domain triplet
+        """
+        sk, img_pos, img_neg, category = batch[0], batch[1], batch[2], batch[7]
 
-        img_feat = self.forward(img_tensor, dtype="image")
-        sk_feat = self.forward(sk_tensor, dtype="sketch")
-        neg_feat = self.forward(neg_tensor, dtype="image")
+        B = sk.size(0)
 
+        # encode
+        img_all = torch.cat([img_pos, img_neg], dim=0)  # [2B, ...]
+        img_feat_all = self.forward(img_all, dtype="image")
+        img_feat, neg_feat = torch.split(img_feat_all, [B, B], dim=0)
+
+        sk_feat = self.forward(sk, dtype="sketch")
+
+        # cross loss only
         loss = self.loss_fn(sk_feat, img_feat, neg_feat)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
+        # for mAP
         self._val_query_feats.append(sk_feat.detach().cpu())
         self._val_gallery_feats.append(img_feat.detach().cpu())
         self._val_categories.extend(_to_key_list(category))

@@ -36,7 +36,7 @@ parser.add_argument('--data_dir', type=str, default='/home/mig/Documents/SBIR_Da
 parser.add_argument('--exp_name', type=str, default='SSL_ph+sk_jepa')
 parser.add_argument('--max_size', type=int, default=224)
 parser.add_argument('--seed', type=int, default=42)
-parser.add_argument('--batch_size', type=int, default=128)
+parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--workers', type=int, default=2)
 parser.add_argument('--max_epochs', type=int, default=50)
 
