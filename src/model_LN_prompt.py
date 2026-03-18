@@ -13,11 +13,9 @@ def freeze_model(m):
     m.requires_grad_(False)
 
 
-def freeze_all_but_bn(m):
+def freeze_all_but_ln(m):
     """
-    NOTE:
-    原作者函数名叫 bn，但这里实际上是保留 LayerNorm 可训练，
-    其他层参数冻结。
+    只保留 LayerNorm 可训练，其余层冻结。
     """
     if not isinstance(m, torch.nn.LayerNorm):
         if hasattr(m, "weight") and m.weight is not None:
@@ -68,13 +66,13 @@ class Model(pl.LightningModule):
         super().__init__()
 
         self.opts = opts
-        self.train_stage = self.opts.train_stage
-        print(f"[Model] train_stage = {self.train_stage}")
 
         # ---------------------------
         # CLIP
-        self.clip, _ = clip.load("ViT-B/32", device=self.device)
-        self.clip.apply(freeze_all_but_bn)
+        # ---------------------------
+        # 这里先在 CPU 上加载，Lightning 后续会自动把整个模型搬到 GPU
+        self.clip, _ = clip.load("ViT-B/32", device="cpu")
+        self.clip.apply(freeze_all_but_ln)
         self.clip.train()
 
         # ---------------------------
@@ -84,11 +82,12 @@ class Model(pl.LightningModule):
         self.img_prompt = nn.Parameter(torch.randn(self.opts.n_prompts, self.opts.prompt_dim))
 
         # ---------------------------
-        # Triplet loss（仅 fine-tune 阶段使用）
+        # Triplet loss
         # ---------------------------
         self.distance_fn = lambda x, y: 1.0 - F.cosine_similarity(x, y)
         self.loss_fn = nn.TripletMarginWithDistanceLoss(
-            distance_function=self.distance_fn, margin=0.2
+            distance_function=self.distance_fn,
+            margin=0.2
         )
 
         self.best_metric = self.opts.best_metric_init
@@ -102,35 +101,16 @@ class Model(pl.LightningModule):
             feat_dim = 512
 
         self.feat_dim = feat_dim
-        hidden_dim = self.opts.jepa_hidden_dim
-
-        # =========================================================
-        # Stage 1: photo-only JEPA predictor
-        # =========================================================
-        self.pred_img2img = nn.Sequential(
-            nn.LayerNorm(feat_dim),
-            nn.Linear(feat_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, feat_dim),
-        )
-
-        # ---------------------------
-        # JEPA config
-        # ---------------------------
-        self.use_detach_jepa_target = self.opts.use_detach_jepa_target
-        self.lambda_jepa_pred = self.opts.lambda_jepa_pred
 
         # =========================================================
         # CLIP text classification loss config
-        # 只在 triplet_finetune 阶段起作用
         # =========================================================
         self.use_clip_cls = self.opts.use_clip_cls
         self.lambda_cls = self.opts.lambda_cls
         self.cls_tau = self.opts.cls_tau
         self.use_clip_logit_scale = self.opts.use_clip_logit_scale
-        
+
         # 训练集 seen classes 名字列表
-        # 必须与训练数据 category 的字符串表达一致
         self.seen_class_names = [str(x) for x in list(getattr(self.opts, "seen_class_names", []))]
 
         # 多模板 prompt
@@ -141,8 +121,6 @@ class Model(pl.LightningModule):
                 [
                     "a photo of a {}",
                     "a photo of the {}",
-                    "a sketch of a {}",
-                    "a sketch of the {}",
                 ],
             )
         )
@@ -159,8 +137,7 @@ class Model(pl.LightningModule):
             persistent=False,
         )
 
-        # 更稳的做法：
-        # classification loss 只把 text encoder 当成固定语义锚点，不去训练 text tower
+        # classification loss 只把 text encoder 当固定语义锚点
         if self.use_clip_cls:
             self.freeze_text_tower()
 
@@ -177,7 +154,6 @@ class Model(pl.LightningModule):
     def freeze_text_tower(self):
         """
         冻结 CLIP text tower，避免 classification loss 反向更新文本编码器。
-        这样 text encoder 只负责提供固定语义原型，更稳。
         """
         if hasattr(self.clip, "transformer"):
             for p in self.clip.transformer.parameters():
@@ -226,15 +202,11 @@ class Model(pl.LightningModule):
                 cname = str(class_name).replace("_", " ")
                 prompts = [tmpl.format(cname) for tmpl in self.cls_templates]
 
-                # CLIP tokenize
                 tokens = clip.tokenize(prompts).to(self.device)
-
-                # [T, D]
-                txt_feat = self.clip.encode_text(tokens)
+                txt_feat = self.clip.encode_text(tokens)   # [T, D]
                 txt_feat = F.normalize(txt_feat, dim=-1)
 
-                # 多模板平均
-                class_feat = txt_feat.mean(dim=0)
+                class_feat = txt_feat.mean(dim=0)          # 多模板平均
                 class_feat = F.normalize(class_feat, dim=0)
 
                 text_features.append(class_feat)
@@ -297,11 +269,11 @@ class Model(pl.LightningModule):
         return loss, logits, acc
 
     # =========================================================
-    # stage helpers
+    # prompt helpers
     # =========================================================
     def init_sk_prompt_from_img_prompt(self):
         """
-        在 fine-tune 前可手动调用：
+        可手动调用：
             model.init_sk_prompt_from_img_prompt()
         让 sketch prompt 从 image prompt 初始化，通常更稳。
         """
@@ -313,12 +285,14 @@ class Model(pl.LightningModule):
     # =========================================================
     def encode_image_branch(self, data):
         return self.clip.encode_image(
-            data, self.img_prompt.expand(data.shape[0], -1, -1)
+            data,
+            self.img_prompt.expand(data.shape[0], -1, -1)
         )
 
     def encode_sketch_branch(self, data):
         return self.clip.encode_image(
-            data, self.sk_prompt.expand(data.shape[0], -1, -1)
+            data,
+            self.sk_prompt.expand(data.shape[0], -1, -1)
         )
 
     def forward(self, data, dtype="image"):
@@ -328,144 +302,74 @@ class Model(pl.LightningModule):
             return self.encode_sketch_branch(data)
 
     # =========================================================
-    # JEPA loss
-    # =========================================================
-    def _cosine_pred_loss(self, pred, target):
-        pred = F.normalize(pred, dim=-1)
-        target = F.normalize(target, dim=-1)
-        return (1.0 - F.cosine_similarity(pred, target, dim=-1)).mean()
-
-    def _photo_jepa_loss(self, img_view1, img_view2):
-        """
-        photo-only JEPA:
-        z1 = encoder(img_view1)
-        z2 = encoder(img_view2)
-        pred = predictor(z1)
-        loss = d(pred, z2)
-        """
-        z1 = self.encode_image_branch(img_view1)
-        z2 = self.encode_image_branch(img_view2)
-
-        pred_z2 = self.pred_img2img(z1)
-
-        if self.use_detach_jepa_target:
-            target = z2.detach()
-        else:
-            target = z2
-
-        loss = self._cosine_pred_loss(pred_z2, target)
-        return loss, z1, z2, pred_z2
-
-    # =========================================================
     # Lightning hooks
     # =========================================================
     def on_fit_start(self):
         """
-        进入 fit 后，模型已经被 Lightning 放到正确 device 上。
-        这里构建 text classifier 最稳。
+        Lightning 已经把模型放到正确 device 上后，构建 text classifier。
         """
-        if self.train_stage == "triplet_finetune" and self.use_clip_cls:
+        if self.use_clip_cls:
             self.build_text_classifier()
 
     # =========================================================
     # optimizer
     # =========================================================
     def configure_optimizers(self):
-        if self.train_stage == "jepa_pretrain":
-            # 预训练阶段：训练 image prompt + predictor + CLIP中未冻结部分（通常是 visual/text 的 LN）
-            # 如果 use_clip_cls=False，这里不涉及 text cls
-            optimizer = torch.optim.Adam(
-                [
-                    {"params": self.clip.parameters(), "lr": self.opts.clip_LN_lr},
-                    {"params": [self.img_prompt], "lr": self.opts.prompt_lr},
-                    {
-                        "params": self.pred_img2img.parameters(),
-                        "lr": getattr(self.opts, "jepa_lr", self.opts.prompt_lr * 0.1),
-                    },
-                ]
-            )
-        else:
-            # fine-tune 阶段：训练 triplet + 可选 cls
-            # text tower 已在 __init__ 中冻结，因此这里只会更新 visual side 可训练参数 + prompts
-            optimizer = torch.optim.Adam(
-                [
-                    {"params": self.clip.parameters(), "lr": self.opts.clip_LN_lr},
-                    {"params": [self.sk_prompt, self.img_prompt], "lr": self.opts.prompt_lr},
-                ]
-            )
-
+        optimizer = torch.optim.Adam(
+            [
+                {"params": self.clip.parameters(), "lr": self.opts.clip_LN_lr},
+                {"params": [self.sk_prompt, self.img_prompt], "lr": self.opts.prompt_lr},
+            ]
+        )
         return optimizer
 
     # =========================================================
     # training
     # =========================================================
     def training_step(self, batch, batch_idx):
-        if self.train_stage == "jepa_pretrain":
-            # PhotoOnlyJEPADataset:
-            # img_view1, img_view2, category, filename
-            img_view1, img_view2 = batch[:2]
+        # sk_tensor, img_tensor, neg_tensor, category, filename
+        sk_tensor, img_tensor, neg_tensor, category = batch[:4]
 
-            loss, z1, z2, pred_z2 = self._photo_jepa_loss(img_view1, img_view2)
-            loss = self.lambda_jepa_pred * loss
+        img_feat = self.forward(img_tensor, dtype="image")
+        sk_feat = self.forward(sk_tensor, dtype="sketch")
+        neg_feat = self.forward(neg_tensor, dtype="image")
 
-            self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-            self.log("train_jepa_pred", loss.detach(), on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_img_norm_v1", z1.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_img_norm_v2", z2.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_pred_norm", pred_z2.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        triplet_loss = self.loss_fn(sk_feat, img_feat, neg_feat)
+        total_loss = triplet_loss
 
-            return loss
+        self.log("train_triplet", triplet_loss, on_step=True, on_epoch=True, prog_bar=False)
 
-        else:
-            # Triplet fine-tune:
-            # sk_tensor, img_tensor, neg_tensor, category, filename
-            sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+        if self.use_clip_cls:
+            labels = self._category_to_label_tensor(category)
 
-            img_feat = self.forward(img_tensor, dtype="image")
-            sk_feat = self.forward(sk_tensor, dtype="sketch")
-            neg_feat = self.forward(neg_tensor, dtype="image")
+            sk_cls_loss, _, sk_acc = self._clip_text_cls_loss(sk_feat, labels)
+            img_cls_loss, _, img_acc = self._clip_text_cls_loss(img_feat, labels)
 
-            triplet_loss = self.loss_fn(sk_feat, img_feat, neg_feat)
-            total_loss = triplet_loss
+            cls_loss = sk_cls_loss + img_cls_loss
+            total_loss = triplet_loss + self.lambda_cls * cls_loss
 
-            self.log("train_triplet", triplet_loss, on_step=True, on_epoch=True, prog_bar=False)
+            self.log("train_cls_sk", sk_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
+            self.log("train_cls_img", img_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
+            self.log("train_cls_total", cls_loss, on_step=True, on_epoch=True, prog_bar=False)
+            self.log("train_acc_sk", sk_acc, on_step=True, on_epoch=True, prog_bar=False)
+            self.log("train_acc_img", img_acc, on_step=True, on_epoch=True, prog_bar=False)
 
-            if self.use_clip_cls:
-                labels = self._category_to_label_tensor(category)
+        self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train_sk_norm", sk_feat.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_img_norm", img_feat.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_neg_norm", neg_feat.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
 
-                sk_cls_loss, sk_logits, sk_acc = self._clip_text_cls_loss(sk_feat, labels)
-                img_cls_loss, img_logits, img_acc = self._clip_text_cls_loss(img_feat, labels)
-
-                cls_loss = sk_cls_loss + img_cls_loss
-                total_loss = triplet_loss + self.lambda_cls * cls_loss
-
-                self.log("train_cls_sk", sk_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-                self.log("train_cls_img", img_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-                self.log("train_cls_total", cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-                self.log("train_acc_sk", sk_acc, on_step=True, on_epoch=True, prog_bar=False)
-                self.log("train_acc_img", img_acc, on_step=True, on_epoch=True, prog_bar=False)
-
-            self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
-            self.log("train_sk_norm", sk_feat.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_img_norm", img_feat.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_neg_norm", neg_feat.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-
-            return total_loss
+        return total_loss
 
     # =========================================================
     # validation
     # =========================================================
     def on_validation_epoch_start(self):
-        if self.train_stage == "triplet_finetune":
-            self._val_query_feats = []
-            self._val_gallery_feats = []
-            self._val_categories = []
+        self._val_query_feats = []
+        self._val_gallery_feats = []
+        self._val_categories = []
 
     def validation_step(self, batch, batch_idx):
-        # JEPA 预训练阶段不做 retrieval validation
-        if self.train_stage == "jepa_pretrain":
-            return None
-
         sk_tensor, img_tensor, neg_tensor, category = batch[:4]
 
         img_feat = self.forward(img_tensor, dtype="image")
@@ -475,12 +379,12 @@ class Model(pl.LightningModule):
         loss = self.loss_fn(sk_feat, img_feat, neg_feat)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
 
-        # 可选：监控验证时 seen-class 分类表现
         if self.use_clip_cls and self.text_classifier.numel() > 0:
             try:
                 labels = self._category_to_label_tensor(category)
                 sk_cls_loss, _, sk_acc = self._clip_text_cls_loss(sk_feat, labels)
                 img_cls_loss, _, img_acc = self._clip_text_cls_loss(img_feat, labels)
+
                 self.log("val_cls_sk", sk_cls_loss, on_step=False, on_epoch=True, prog_bar=False)
                 self.log("val_cls_img", img_cls_loss, on_step=False, on_epoch=True, prog_bar=False)
                 self.log("val_acc_sk", sk_acc, on_step=False, on_epoch=True, prog_bar=False)
@@ -497,9 +401,6 @@ class Model(pl.LightningModule):
         return loss
 
     def on_validation_epoch_end(self):
-        if self.train_stage == "jepa_pretrain":
-            return
-
         if len(self._val_query_feats) == 0:
             return
 
@@ -522,7 +423,7 @@ class Model(pl.LightningModule):
 
         print(
             f"[VAL] pos_count min/mean/max = "
-            f"{min(pos_counts)}/{(sum(pos_counts)/len(pos_counts)):.2f}/{max(pos_counts)}"
+            f"{min(pos_counts)}/{(sum(pos_counts) / len(pos_counts)):.2f}/{max(pos_counts)}"
         )
 
         ap = torch.zeros(len(query), dtype=torch.float32)
