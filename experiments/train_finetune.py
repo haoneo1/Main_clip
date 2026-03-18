@@ -29,7 +29,7 @@ if __name__ == '__main__':
     # 2) Stage / experiment name
     # =========================
     opts.train_stage = "triplet_finetune"
-    opts.pretrain_ckpt = '/home/mig/Documents/SBIR_Data/saved_models/SSL_ph+sk_jepa_pretrain/lapwdst.ckpt'
+    opts.pretrain_ckpt = '/home/mig/Documents/SBIR_Data/saved_models/SSL_cross-ph+sk_dino+jepa_pretrain/pretrain-epoch=00-train_loss_epoch=0.2003.ckpt'
 
     if not opts.exp_name.endswith("_finetune"):
         opts.exp_name = f"{opts.exp_name}_finetune"

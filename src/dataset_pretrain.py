@@ -16,16 +16,20 @@ unseen_classes = [
 
 class MultiModalJEPADataset(torch.utils.data.Dataset):
     """
-    JEPA pretraining dataset with both photo and sketch.
     Each sample returns:
-        img_view1, img_view2, sk_view1, sk_view2, category
+        img_global1, img_global2, img_local,
+        sk_global1, sk_global2, sk_local,
+        category
     """
 
-    def __init__(self, opts, transform_img, transform_sk=None, mode='train', return_orig=False):
+    def __init__(self, opts, transforms_dict, mode='train', return_orig=False):
         self.opts = opts
-        self.transform_img = transform_img
-        self.transform_sk = transform_sk if transform_sk is not None else transform_img
         self.return_orig = return_orig
+
+        self.img_global_tf = transforms_dict["img_global"]
+        self.img_local_tf = transforms_dict["img_local"]
+        self.sk_global_tf = transforms_dict["sk_global"]
+        self.sk_local_tf = transforms_dict["sk_local"]
 
         self.all_categories = os.listdir(os.path.join(self.opts.data_dir, 'sketch'))
         if '.ipynb_checkpoints' in self.all_categories:
@@ -47,8 +51,8 @@ class MultiModalJEPADataset(torch.utils.data.Dataset):
 
         self.photo_dict = {}
         self.sketch_dict = {}
-
         valid_categories = []
+
         for category in self.all_categories:
             photo_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'photo', category, '*.jpg')))
             sketch_list = sorted(glob.glob(os.path.join(self.opts.data_dir, 'sketch', category, '*.png')))
@@ -61,8 +65,6 @@ class MultiModalJEPADataset(torch.utils.data.Dataset):
                 valid_categories.append(category)
 
         self.all_categories = valid_categories
-
-        # length by photos for enough iterations; category sampled by index
         self.length = sum(len(self.photo_dict[c]) for c in self.all_categories)
 
     def __len__(self):
@@ -83,39 +85,101 @@ class MultiModalJEPADataset(torch.utils.data.Dataset):
         img = self._load_and_pad(img_path)
         sk = self._load_and_pad(sk_path)
 
-        img_view1 = self.transform_img(img)
-        img_view2 = self.transform_img(img)
+        img_global1 = self.img_global_tf(img)
+        img_global2 = self.img_global_tf(img)
+        img_local = self.img_local_tf(img)
 
-        sk_view1 = self.transform_sk(sk)
-        sk_view2 = self.transform_sk(sk)
+        sk_global1 = self.sk_global_tf(sk)
+        sk_global2 = self.sk_global_tf(sk)
+        sk_local = self.sk_local_tf(sk)
 
         if self.return_orig:
-            return img_view1, img_view2, sk_view1, sk_view2, category, img, sk
+            return (
+                img_global1, img_global2, img_local,
+                sk_global1, sk_global2, sk_local,
+                category, img, sk
+            )
         else:
-            return img_view1, img_view2, sk_view1, sk_view2, category
+            return (
+                img_global1, img_global2, img_local,
+                sk_global1, sk_global2, sk_local,
+                category
+            )
 
     @staticmethod
     def data_transform(opts):
-        transform = transforms.Compose([
+        normalize = transforms.Normalize(
+            mean=[0.48145466, 0.4578275, 0.40821073],
+            std=[0.26862954, 0.26130258, 0.27577711]
+        )
+
+        img_global = transforms.Compose([
             transforms.Resize((opts.max_size, opts.max_size)),
             transforms.RandomResizedCrop(
                 size=opts.max_size,
-                scale=(0.7, 1.0),
+                scale=(0.65, 1.0),
                 ratio=(0.9, 1.1)
             ),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomApply([
                 transforms.ColorJitter(
-                    brightness=0.2,
-                    contrast=0.2,
-                    saturation=0.2,
-                    hue=0.05
+                    brightness=0.25,
+                    contrast=0.25,
+                    saturation=0.25,
+                    hue=0.08
                 )
             ], p=0.5),
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
+            normalize,
         ])
-        return transform
+
+        img_local = transforms.Compose([
+            transforms.Resize((opts.max_size, opts.max_size)),
+            transforms.RandomResizedCrop(
+                size=opts.max_size,
+                scale=(0.35, 0.7),
+                ratio=(0.75, 1.33)
+            ),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomApply([
+                transforms.ColorJitter(
+                    brightness=0.25,
+                    contrast=0.25,
+                    saturation=0.25,
+                    hue=0.08
+                )
+            ], p=0.5),
+            transforms.ToTensor(),
+            normalize,
+        ])
+
+        sk_global = transforms.Compose([
+            transforms.Resize((opts.max_size, opts.max_size)),
+            transforms.RandomResizedCrop(
+                size=opts.max_size,
+                scale=(0.75, 1.0),
+                ratio=(0.9, 1.1)
+            ),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            normalize,
+        ])
+
+        sk_local = transforms.Compose([
+            transforms.Resize((opts.max_size, opts.max_size)),
+            transforms.RandomResizedCrop(
+                size=opts.max_size,
+                scale=(0.45, 0.8),
+                ratio=(0.8, 1.25)
+            ),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            normalize,
+        ])
+
+        return {
+            "img_global": img_global,
+            "img_local": img_local,
+            "sk_global": sk_global,
+            "sk_local": sk_local,
+        }

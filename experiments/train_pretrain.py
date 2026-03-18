@@ -22,12 +22,11 @@ if __name__ == '__main__':
     save_dir = os.path.join(opts.save_root, opts.exp_name)
     os.makedirs(save_dir, exist_ok=True)
 
-    dataset_transforms = MultiModalJEPADataset.data_transform(opts)
+    transforms_dict = MultiModalJEPADataset.data_transform(opts)
 
     train_dataset = MultiModalJEPADataset(
-        opts,
-        transform_img=dataset_transforms,
-        transform_sk=dataset_transforms,
+        opts=opts,
+        transforms_dict=transforms_dict,
         mode='train',
         return_orig=False
     )
@@ -42,10 +41,10 @@ if __name__ == '__main__':
         persistent_workers=(opts.workers > 0),
     )
 
-    print(f"[JEPA PRETRAIN] num samples: {len(train_dataset)}")
-    print(f"[JEPA PRETRAIN] num categories: {len(train_dataset.all_categories)}")
-    print(f"[JEPA PRETRAIN] first 10 categories: {train_dataset.all_categories[:10]}")
-    print(f"[JEPA PRETRAIN] save_dir: {save_dir}")
+    print(f"[PRETRAIN] num samples: {len(train_dataset)}")
+    print(f"[PRETRAIN] num categories: {len(train_dataset.all_categories)}")
+    print(f"[PRETRAIN] first 10 categories: {train_dataset.all_categories[:10]}")
+    print(f"[PRETRAIN] save_dir: {save_dir}")
 
     logger = TensorBoardLogger('tb_logs', name=opts.exp_name)
 
@@ -62,7 +61,7 @@ if __name__ == '__main__':
     if not os.path.exists(ckpt_path):
         ckpt_path = None
     else:
-        print(f"[JEPA PRETRAIN] resuming training from {ckpt_path}")
+        print(f"[PRETRAIN] resuming training from {ckpt_path}")
 
     trainer = Trainer(
         accelerator="gpu",
@@ -77,5 +76,5 @@ if __name__ == '__main__':
 
     model = PretrainModel(opts)
 
-    print('[JEPA PRETRAIN] beginning multimodal LeJEPA-like pretraining...')
+    print('[PRETRAIN] beginning cross-modal DINO-like + JEPA-like pretraining...')
     trainer.fit(model, train_loader, ckpt_path=ckpt_path)
