@@ -17,11 +17,8 @@ if __name__ == '__main__':
     seed = getattr(opts, "seed", 42)
     pl.seed_everything(seed, workers=True)
 
-    # 如需更强确定性可打开：
-    # import torch
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
-    # torch.use_deterministic_algorithms(True)
+    save_dir = os.path.join(opts.save_root, opts.exp_name)
+    os.makedirs(save_dir, exist_ok=True)
 
     # =========================
     # 2) Dataset / DataLoader
@@ -39,7 +36,6 @@ if __name__ == '__main__':
 
     # 给 text classification loss 用
     opts.seen_class_names = [str(x) for x in train_dataset.all_categories]
-    print("seen classes:", opts.seen_class_names)
 
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -71,7 +67,7 @@ if __name__ == '__main__':
     # =========================
     checkpoint_callback = ModelCheckpoint(
         monitor='mAP',
-        dirpath=f'saved_models/{opts.exp_name}',
+        dirpath= save_dir,
         filename="best-{epoch:02d}-{mAP:.4f}",
         mode='max',
         save_top_k=1,
@@ -85,7 +81,7 @@ if __name__ == '__main__':
         min_delta=1e-4,
     )
 
-    ckpt_path = os.path.join('saved_models', opts.exp_name, 'last.ckpt')
+    ckpt_path = os.path.join(save_dir, 'last.ckpt')
     if not os.path.exists(ckpt_path):
         ckpt_path = None
     else:

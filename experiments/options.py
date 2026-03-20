@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser(description='Sketch-based OD')
 # 常规设置
 # ----------------------
 parser.add_argument('--data_dir', type=str, default='/home/mig/Documents/SBIR_Data/Sketchy/')
+parser.add_argument('--save_root', type=str, default='/home/mig/Documents/SBIR_Data/saved_models/')
 parser.add_argument('--exp_name', type=str, default='clip_triplet_cls')
 parser.add_argument('--max_size', type=int, default=224)
 parser.add_argument('--seed', type=int, default=42)

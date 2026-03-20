@@ -65,11 +65,6 @@ class Sketchy(Dataset):
         self.sketch_root = os.path.join(self.opts.data_dir, 'sketch')
         self.photo_root = os.path.join(self.opts.data_dir, 'photo')
 
-        if not os.path.isdir(self.sketch_root):
-            raise FileNotFoundError(f"Sketch folder not found: {self.sketch_root}")
-        if not os.path.isdir(self.photo_root):
-            raise FileNotFoundError(f"Photo folder not found: {self.photo_root}")
-
         # --------------------------------------------------
         # 1) 收集全部类别
         # --------------------------------------------------
@@ -78,10 +73,6 @@ class Sketchy(Dataset):
             if os.path.isdir(os.path.join(self.sketch_root, c))
             and c != '.ipynb_checkpoints'
         ])
-
-        if len(self.all_categories) == 0:
-            raise RuntimeError(f"No categories found under: {self.sketch_root}")
-
         # --------------------------------------------------
         # 2) 类别划分
         # --------------------------------------------------
