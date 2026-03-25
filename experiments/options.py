@@ -42,7 +42,7 @@ parser.add_argument("--exp_name", type=str, default="fg_sbir_tri")
 # ----------------------
 parser.add_argument("--max_size", type=int, default=224)
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--batch_size", type=int, default=128)
+parser.add_argument("--batch_size", type=int, default=32)
 parser.add_argument("--workers", type=int, default=4)
 parser.add_argument("--max_epochs", type=int, default=100)
 
@@ -69,7 +69,7 @@ parser.add_argument(
 # CLIP classification
 # FG-SBIR 第一版建议关闭
 # ----------------------
-parser.add_argument("--use_clip_cls", type=str2bool, default=False)
+parser.add_argument("--use_clip_cls", type=str2bool, default=True)
 parser.add_argument("--cls_tau", type=float, default=0.07)
 parser.add_argument("--use_clip_logit_scale", type=str2bool, default=True)
 parser.add_argument("--lambda_cls", type=float, default=0.0)
