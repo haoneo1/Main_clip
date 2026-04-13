@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.model_base import BasePromptModel
+from src.retrieval_losses import category_list_to_mask, supervised_infonce
 
 
 class PretrainModel(BasePromptModel):
@@ -56,6 +57,37 @@ class PretrainModel(BasePromptModel):
         p2 = F.normalize(p2, dim=-1)
         return (1.0 - F.cosine_similarity(p1, p2, dim=-1)).mean()
 
+    def _cosine_to_center_multi(self, p_views, center):
+        # p_views: [B, V, D], center: [B, D]
+        p_views = F.normalize(p_views, dim=-1)
+        center = F.normalize(center, dim=-1).unsqueeze(1)
+        sim = (p_views * center).sum(dim=-1)
+        return (1.0 - sim).mean()
+
+    def _clip_input_resolution(self):
+        """CLIP ViT positional embeddings are fixed to (input_resolution // patch) ** 2 + 1 tokens."""
+        visual = self.clip.visual
+        r = getattr(visual, "input_resolution", 224)
+        if isinstance(r, torch.Tensor):
+            r = int(r.item())
+        return int(r)
+
+    def _encode_multi_views(self, x, branch="image"):
+        # x: [B, V, C, H, W] -> [B, V, D]
+        bsz, n_views, c, h, w = x.shape
+        x = x.reshape(bsz * n_views, c, h, w)
+        target = self._clip_input_resolution()
+        if h != target or w != target:
+            x = F.interpolate(
+                x, size=(target, target), mode="bicubic", align_corners=False
+            )
+        if branch == "image":
+            z = self.encode_image_branch(x)
+        else:
+            z = self.encode_sketch_branch(x)
+        p = self._project(z).reshape(bsz, n_views, -1)
+        return z.reshape(bsz, n_views, -1), p
+
     def _variance_regularizer(self, x, eps=1e-4):
         """
         VICReg-style variance floor regularizer.
@@ -87,65 +119,92 @@ class PretrainModel(BasePromptModel):
     # -------------------------
     # multi-modal LeJEPA-style loss
     # -------------------------
-    def _multimodal_jepa_loss(self, img_view1, img_view2, sk_view1, sk_view2):
-        # backbone features
-        z_img1 = self.encode_image_branch(img_view1)
-        z_img2 = self.encode_image_branch(img_view2)
-        z_sk1 = self.encode_sketch_branch(sk_view1)
-        z_sk2 = self.encode_sketch_branch(sk_view2)
+    def _multimodal_jepa_loss(
+        self, img_globals, img_locals, sk_globals, sk_locals, categories=None
+    ):
+        # backbone + projector for multi-views
+        z_img_g, p_img_g = self._encode_multi_views(img_globals, branch="image")
+        z_img_l, p_img_l = self._encode_multi_views(img_locals, branch="image")
+        z_sk_g, p_sk_g = self._encode_multi_views(sk_globals, branch="sketch")
+        z_sk_l, p_sk_l = self._encode_multi_views(sk_locals, branch="sketch")
 
-        # projection space
-        p_img1 = self._project(z_img1)
-        p_img2 = self._project(z_img2)
-        p_sk1 = self._project(z_sk1)
-        p_sk2 = self._project(z_sk2)
+        # modality-specific global centers
+        mu_p = p_img_g.mean(dim=1)  # [B, D]
+        mu_s = p_sk_g.mean(dim=1)   # [B, D]
 
-        # shared latent center
-        center = (p_img1 + p_img2 + p_sk1 + p_sk2) / 4.0
-
-        # center-based JEPA loss
-        center_loss = (
-            self._cosine_to_center(p_img1, center) +
-            self._cosine_to_center(p_img2, center) +
-            self._cosine_to_center(p_sk1, center) +
-            self._cosine_to_center(p_sk2, center)
-        ) / 4.0
-
-        # optional explicit intra-modal consistency
-        intra_loss = (
-            self._pair_cosine_loss(p_img1, p_img2) +
-            self._pair_cosine_loss(p_sk1, p_sk2)
+        # intra-modal: all views -> own global center
+        intra_photo = (
+            self._cosine_to_center_multi(p_img_g, mu_p) +
+            self._cosine_to_center_multi(p_img_l, mu_p)
+        ) / 2.0
+        intra_sketch = (
+            self._cosine_to_center_multi(p_sk_g, mu_s) +
+            self._cosine_to_center_multi(p_sk_l, mu_s)
         ) / 2.0
 
-        # optional explicit cross-modal consistency
-        cross_loss = (
-            self._pair_cosine_loss(p_img1, p_sk1) +
-            self._pair_cosine_loss(p_img1, p_sk2) +
-            self._pair_cosine_loss(p_img2, p_sk1) +
-            self._pair_cosine_loss(p_img2, p_sk2)
-        ) / 4.0
+        # cross-modal global-global
+        cross_global = self._pair_cosine_loss(mu_s, mu_p)
 
-        jepa_loss = center_loss + self.lambda_intra * intra_loss + self.lambda_cross * cross_loss
+        # cross-modal local -> opposite global center
+        cross_local2global = (
+            self._cosine_to_center_multi(p_sk_l, mu_p) +
+            self._cosine_to_center_multi(p_img_l, mu_s)
+        ) / 2.0
 
-        # anti-collapse regularization
-        p_all = torch.cat([p_img1, p_img2, p_sk1, p_sk2], dim=0)
-        #reg_loss = self._regularization_loss(p_all)
+        # weighted objective (first stable version)
+        lambda_intra_sk = getattr(self.opts, "lambda_intra_sk", 0.5)
+        lambda_intra_ph = getattr(self.opts, "lambda_intra_ph", 0.5)
+        lambda_cross_global = getattr(self.opts, "lambda_cross_global", 0.3)
+        lambda_cross_local2global = getattr(self.opts, "lambda_cross_local2global", 0.2)
 
-        #total_loss = self.lambda_jepa * jepa_loss + self.lambda_reg * reg_loss
-        total_loss = self.lambda_jepa * jepa_loss
+        jepa_loss = (
+            lambda_intra_sk * intra_sketch +
+            lambda_intra_ph * intra_photo +
+            lambda_cross_global * cross_global +
+            lambda_cross_local2global * cross_local2global
+        )
+
+        # anti-collapse regularization (optional, lightweight)
+        p_all = torch.cat(
+            [
+                p_img_g.reshape(-1, p_img_g.shape[-1]),
+                p_img_l.reshape(-1, p_img_l.shape[-1]),
+                p_sk_g.reshape(-1, p_sk_g.shape[-1]),
+                p_sk_l.reshape(-1, p_sk_l.shape[-1]),
+            ],
+            dim=0,
+        )
+        reg_loss = self._regularization_loss(p_all)
+
+        total_loss = self.lambda_jepa * jepa_loss + self.lambda_reg * reg_loss
+        align_loss = jepa_loss.new_tensor(0.0)
+        lam_align = float(getattr(self.opts, "lambda_pretrain_sk_img_align", 0.0))
+        if (
+            lam_align > 0
+            and categories is not None
+            and len(categories) == mu_s.shape[0]
+            and mu_s.shape[0] > 1
+        ):
+            mask = category_list_to_mask(categories, mu_s.device)
+            tau = float(getattr(self.opts, "pretrain_infonce_tau", 0.07))
+            align_loss = supervised_infonce(mu_s, mu_p, mask, tau=tau)
+            total_loss = total_loss + lam_align * align_loss
+
         stats = {
-            "z_img1": z_img1,
-            "z_img2": z_img2,
-            "z_sk1": z_sk1,
-            "z_sk2": z_sk2,
-            "p_img1": p_img1,
-            "p_img2": p_img2,
-            "p_sk1": p_sk1,
-            "p_sk2": p_sk2,
-            "center_loss": center_loss.detach(),
-            "intra_loss": intra_loss.detach(),
-            "cross_loss": cross_loss.detach(),
-            ##"reg_loss": reg_loss.detach(),
+            "z_img_g": z_img_g,
+            "z_img_l": z_img_l,
+            "z_sk_g": z_sk_g,
+            "z_sk_l": z_sk_l,
+            "p_img_g": p_img_g,
+            "p_img_l": p_img_l,
+            "p_sk_g": p_sk_g,
+            "p_sk_l": p_sk_l,
+            "intra_photo": intra_photo.detach(),
+            "intra_sketch": intra_sketch.detach(),
+            "cross_global": cross_global.detach(),
+            "cross_local2global": cross_local2global.detach(),
+            "reg_loss": reg_loss.detach(),
+            "align_loss": align_loss.detach(),
         }
 
         return total_loss, stats
@@ -161,21 +220,24 @@ class PretrainModel(BasePromptModel):
         return optimizer
 
     def training_step(self, batch, batch_idx):
-        img_view1, img_view2, sk_view1, sk_view2 = batch[:4]
+        img_globals, img_locals, sk_globals, sk_locals = batch[:4]
+        categories = batch[4] if len(batch) > 4 else None
 
         loss, stats = self._multimodal_jepa_loss(
-            img_view1, img_view2, sk_view1, sk_view2
+            img_globals, img_locals, sk_globals, sk_locals, categories=categories
         )
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("train_center_loss", stats["center_loss"], on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_intra_loss", stats["intra_loss"], on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_cross_loss", stats["cross_loss"], on_step=True, on_epoch=True, prog_bar=False)
-        #self.log("train_reg_loss", stats["reg_loss"], on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_intra_photo", stats["intra_photo"], on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_intra_sketch", stats["intra_sketch"], on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_cross_global", stats["cross_global"], on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_cross_local2global", stats["cross_local2global"], on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_reg_loss", stats["reg_loss"], on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_align_loss", stats["align_loss"], on_step=True, on_epoch=True, prog_bar=False)
 
-        self.log("train_img_feat_norm", stats["z_img1"].norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_sk_feat_norm", stats["z_sk1"].norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_img_proj_norm", stats["p_img1"].norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_sk_proj_norm", stats["p_sk1"].norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_img_feat_norm", stats["z_img_g"].norm(dim=-1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_sk_feat_norm", stats["z_sk_g"].norm(dim=-1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_img_proj_norm", stats["p_img_g"].norm(dim=-1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_sk_proj_norm", stats["p_sk_g"].norm(dim=-1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
 
         return loss

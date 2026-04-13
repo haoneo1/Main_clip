@@ -5,16 +5,19 @@ from torchmetrics.functional import retrieval_average_precision
 
 from src.model_base import BasePromptModel, _to_key_list
 from src.clip import clip
+from src.retrieval_losses import label_tensor_to_mask, supervised_infonce
 
 
 class FinetuneModel(BasePromptModel):
     def __init__(self, opts):
         super().__init__(opts)
 
+        margin = float(getattr(opts, "triplet_margin", 0.2))
         self.distance_fn = lambda x, y: 1.0 - F.cosine_similarity(x, y)
         self.loss_fn = torch.nn.TripletMarginWithDistanceLoss(
-            distance_function=self.distance_fn, margin=0.2
+            distance_function=self.distance_fn, margin=margin
         )
+        self.label_smoothing = float(getattr(opts, "cls_label_smoothing", 0.0))
 
         self.best_metric = self.opts.best_metric_init
 
@@ -22,6 +25,8 @@ class FinetuneModel(BasePromptModel):
         self.lambda_cls = self.opts.lambda_cls
         self.cls_tau = self.opts.cls_tau
         self.use_clip_logit_scale = self.opts.use_clip_logit_scale
+        self.lambda_infonce = float(getattr(opts, "lambda_infonce", 0.0))
+        self.finetune_infonce_tau = float(getattr(opts, "finetune_infonce_tau", 0.07))
 
         self.seen_class_names = [str(x) for x in self.opts.seen_class_names]
 
@@ -137,21 +142,88 @@ class FinetuneModel(BasePromptModel):
         scale = self._get_cls_logit_scale()
         logits = scale * torch.matmul(feat, text_w.t())
 
-        loss = F.cross_entropy(logits, labels)
+        loss = F.cross_entropy(
+            logits, labels, label_smoothing=self.label_smoothing
+        )
         acc = (logits.argmax(dim=1) == labels).float().mean()
         return loss, logits, acc
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(
+        clip_lr = float(getattr(self.opts, "finetune_clip_LN_lr", self.opts.clip_LN_lr))
+        prompt_lr = float(getattr(self.opts, "finetune_prompt_lr", self.opts.prompt_lr))
+        wd = float(getattr(self.opts, "finetune_weight_decay", 0.01))
+
+        if getattr(self.opts, "use_finetune_lr_plateau", False):
+            optimizer = torch.optim.AdamW(
+                [
+                    {
+                        "params": self.clip.parameters(),
+                        "lr": clip_lr,
+                        "weight_decay": wd,
+                    },
+                    {
+                        "params": [self.sk_prompt, self.img_prompt],
+                        "lr": prompt_lr,
+                        "weight_decay": 0.0,
+                    },
+                ],
+            )
+            sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                mode="max",
+                factor=float(getattr(self.opts, "lr_plateau_factor", 0.5)),
+                patience=int(getattr(self.opts, "lr_plateau_patience", 8)),
+                min_lr=float(getattr(self.opts, "lr_plateau_min_lr", 1e-8)),
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": sched,
+                    "monitor": "mAP",
+                    "interval": "epoch",
+                    "frequency": 1,
+                },
+            }
+
+        if getattr(self.opts, "finetune_use_cosine_lr", True):
+            optimizer = torch.optim.AdamW(
+                [
+                    {
+                        "params": self.clip.parameters(),
+                        "lr": clip_lr,
+                        "weight_decay": wd,
+                    },
+                    {
+                        "params": [self.sk_prompt, self.img_prompt],
+                        "lr": prompt_lr,
+                        "weight_decay": 0.0,
+                    },
+                ],
+            )
+            max_ep = max(1, int(getattr(self.opts, "max_epochs", 50)))
+            eta_min = float(getattr(self.opts, "finetune_cosine_eta_min", 1e-8))
+            sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max_ep, eta_min=eta_min
+            )
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": sched,
+                    "interval": "epoch",
+                    "frequency": 1,
+                },
+            }
+
+        return torch.optim.Adam(
             [
-                {"params": self.clip.parameters(), "lr": self.opts.clip_LN_lr},
-                {"params": [self.sk_prompt, self.img_prompt], "lr": self.opts.prompt_lr},
+                {"params": self.clip.parameters(), "lr": clip_lr},
+                {"params": [self.sk_prompt, self.img_prompt], "lr": prompt_lr},
             ]
         )
-        return optimizer
 
     def training_step(self, batch, batch_idx):
         sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+        bs = sk_tensor.shape[0]
 
         img_feat = self.forward(img_tensor, dtype="image")
         sk_feat = self.forward(sk_tensor, dtype="sketch")
@@ -160,7 +232,30 @@ class FinetuneModel(BasePromptModel):
         triplet_loss = self.loss_fn(sk_feat, img_feat, neg_feat)
         total_loss = triplet_loss
 
-        self.log("train_triplet", triplet_loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log(
+            "train_triplet",
+            triplet_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=False,
+            batch_size=bs,
+        )
+
+        if self.lambda_infonce > 0 and sk_feat.shape[0] > 1:
+            labels = self._category_to_label_tensor(category)
+            mask = label_tensor_to_mask(labels)
+            inc = supervised_infonce(
+                sk_feat, img_feat, mask, tau=self.finetune_infonce_tau
+            )
+            total_loss = total_loss + self.lambda_infonce * inc
+            self.log(
+                "train_infonce",
+                inc,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+                batch_size=bs,
+            )
 
         if self.use_clip_cls:
             labels = self._category_to_label_tensor(category)
@@ -169,15 +264,21 @@ class FinetuneModel(BasePromptModel):
             img_cls_loss, _, img_acc = self._clip_text_cls_loss(img_feat, labels)
 
             cls_loss = sk_cls_loss + img_cls_loss
-            total_loss = triplet_loss + self.lambda_cls * cls_loss
+            total_loss = total_loss + self.lambda_cls * cls_loss
 
-            self.log("train_cls_sk", sk_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_cls_img", img_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_cls_total", cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_acc_sk", sk_acc, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_acc_img", img_acc, on_step=True, on_epoch=True, prog_bar=False)
+            self.log(
+                "train_cls_sk", sk_cls_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs
+            )
+            self.log(
+                "train_cls_img", img_cls_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs
+            )
+            self.log(
+                "train_cls_total", cls_loss, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs
+            )
+            self.log("train_acc_sk", sk_acc, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs)
+            self.log("train_acc_img", img_acc, on_step=True, on_epoch=True, prog_bar=False, batch_size=bs)
 
-        self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=bs)
         return total_loss
 
     def on_validation_epoch_start(self):
@@ -193,7 +294,14 @@ class FinetuneModel(BasePromptModel):
         neg_feat = self.forward(neg_tensor, dtype="image")
 
         loss = self.loss_fn(sk_feat, img_feat, neg_feat)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(
+            "val_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=sk_tensor.shape[0],
+        )
 
         self._val_query_feats.append(sk_feat.detach().cpu())
         self._val_gallery_feats.append(img_feat.detach().cpu())
@@ -226,8 +334,9 @@ class FinetuneModel(BasePromptModel):
             ap[idx] = retrieval_average_precision(scores, target)
 
         mAP = ap.mean()
-        self.log("mAP", mAP, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("top10", mAP, on_step=False, on_epoch=True, prog_bar=False)
+        val_n = int(query.shape[0])
+        self.log("mAP", mAP, on_step=False, on_epoch=True, prog_bar=True, batch_size=val_n)
+        self.log("top10", mAP, on_step=False, on_epoch=True, prog_bar=False, batch_size=val_n)
 
         if self.global_step > 0:
             self.best_metric = max(self.best_metric, float(mAP.item()))

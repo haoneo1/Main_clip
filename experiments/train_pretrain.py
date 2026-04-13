@@ -1,5 +1,14 @@
 import os
+import sys
+from pathlib import Path
+
+# Allow `python experiments/train_pretrain.py` (repo root must be on PYTHONPATH).
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import pytorch_lightning as pl
+import torch
 from torch.utils.data import DataLoader
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
@@ -11,6 +20,7 @@ from experiments.options import opts
 
 
 if __name__ == '__main__':
+    torch.set_float32_matmul_precision('high')
     pl.seed_everything(opts.seed, workers=True)
 
     opts.train_stage = "pretrain"
@@ -31,6 +41,15 @@ if __name__ == '__main__':
         mode='train',
         return_orig=False
     )
+
+    total_views = opts.num_global_sk + opts.num_local_sk + opts.num_global_ph + opts.num_local_ph
+    if opts.batch_size * total_views > 192:
+        old_bs = opts.batch_size
+        opts.batch_size = max(8, 192 // max(total_views, 1))
+        print(
+            f"[JEPA PRETRAIN] auto-adjust batch_size {old_bs} -> {opts.batch_size} "
+            f"(total_views={total_views}) to reduce OOM risk."
+        )
 
     train_loader = DataLoader(
         dataset=train_dataset,
@@ -67,6 +86,7 @@ if __name__ == '__main__':
     trainer = Trainer(
         accelerator="gpu",
         devices=1,
+        precision=opts.precision,
         min_epochs=1,
         max_epochs=opts.max_epochs,
         benchmark=False,

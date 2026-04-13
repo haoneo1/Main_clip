@@ -1,5 +1,6 @@
 import os
 import glob
+import random
 import numpy as np
 import torch
 from torchvision import transforms
@@ -37,6 +38,7 @@ class Sketchy(torch.utils.data.Dataset):
 
         self.opts = opts
         self.transform = transform
+        self.mode = mode
         self.return_orig = return_orig
 
         self.all_categories = os.listdir(os.path.join(self.opts.data_dir, 'sketch'))
@@ -81,6 +83,12 @@ class Sketchy(torch.utils.data.Dataset):
         img_data = ImageOps.pad(Image.open(img_path).convert('RGB'), size=(self.opts.max_size, self.opts.max_size))
         neg_data = ImageOps.pad(Image.open(neg_path).convert('RGB'), size=(self.opts.max_size, self.opts.max_size))
 
+        # Same flip for sk / pos / neg so cross-modal pairs stay geometrically consistent.
+        if self.mode == 'train' and random.random() < 0.5:
+            sk_data = ImageOps.mirror(sk_data)
+            img_data = ImageOps.mirror(img_data)
+            neg_data = ImageOps.mirror(neg_data)
+
         sk_tensor  = self.transform(sk_data)
         img_tensor = self.transform(img_data)
         neg_tensor = self.transform(neg_data)
@@ -92,22 +100,33 @@ class Sketchy(torch.utils.data.Dataset):
             return (sk_tensor, img_tensor, neg_tensor, category, filename)
 
     @staticmethod
-    def data_transform(opts):
-        dataset_transforms = transforms.Compose([
-            transforms.Resize((opts.max_size, opts.max_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        return dataset_transforms
+    def data_transform(opts, train=False):
+        tlist = [transforms.Resize((opts.max_size, opts.max_size))]
+        tlist.extend(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
+            ]
+        )
+        return transforms.Compose(tlist)
 
 
 if __name__ == '__main__':
     from experiments.options import opts
     import tqdm
 
-    dataset_transforms = Sketchy.data_transform(opts)
-    dataset_train = Sketchy(opts, dataset_transforms, mode='train', return_orig=True)
-    dataset_val = Sketchy(opts, dataset_transforms, mode='val', used_cat=dataset_train.all_categories, return_orig=True)
+    dataset_train = Sketchy(
+        opts, Sketchy.data_transform(opts, train=True), mode='train', return_orig=True
+    )
+    dataset_val = Sketchy(
+        opts,
+        Sketchy.data_transform(opts, train=False),
+        mode='val',
+        used_cat=dataset_train.all_categories,
+        return_orig=True,
+    )
 
     idx = 0
     for data in tqdm.tqdm(dataset_val):
