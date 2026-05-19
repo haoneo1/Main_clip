@@ -39,28 +39,9 @@ class Sketchy(torch.utils.data.Dataset):
         self.transform = transform
         self.return_orig = return_orig
 
-        self.all_categories = os.listdir(os.path.join(self.opts.data_dir, 'sketch'))
-        if '.ipynb_checkpoints' in self.all_categories:
-            self.all_categories.remove('.ipynb_checkpoints')
-            
-        if self.opts.data_split > 0:
-            np.random.shuffle(self.all_categories)
-            if used_cat is None:
-                self.all_categories = self.all_categories[:int(len(self.all_categories)*self.opts.data_split)]
-            else:
-                self.all_categories = list(set(self.all_categories) - set(used_cat))
-        else:
-            if mode == 'train':
-                self.all_categories = list(set(self.all_categories) - set(unseen_classes))
-            else:
-                self.all_categories = unseen_classes
-
-        self.all_sketches_path = []
-        self.all_photos_path = {}
-
-        for category in self.all_categories:
-            self.all_sketches_path.extend(glob.glob(os.path.join(self.opts.data_dir, 'sketch', category, '*.png')))
-            self.all_photos_path[category] = glob.glob(os.path.join(self.opts.data_dir, 'photo', category, '*.jpg'))
+        categories = self._load_categories()
+        self.all_categories = self._select_categories(categories, mode, used_cat)
+        self.all_sketches_path, self.all_photos_path = self._build_index(self.all_categories)
 
     def __len__(self):
         return len(self.all_sketches_path)
@@ -69,17 +50,14 @@ class Sketchy(torch.utils.data.Dataset):
         filepath = self.all_sketches_path[index]                
         category = filepath.split(os.path.sep)[-2]
         filename = os.path.basename(filepath)
-        
-        neg_classes = self.all_categories.copy()
-        neg_classes.remove(category)
 
-        sk_path  = filepath
-        img_path = np.random.choice(self.all_photos_path[category])
-        neg_path = np.random.choice(self.all_photos_path[np.random.choice(neg_classes)])
+        neg_classes = [c for c in self.all_categories if c != category]
+        pos_img_path = np.random.choice(self.all_photos_path[category])
+        neg_img_path = np.random.choice(self.all_photos_path[np.random.choice(neg_classes)])
 
-        sk_data  = ImageOps.pad(Image.open(sk_path).convert('RGB'),  size=(self.opts.max_size, self.opts.max_size))
-        img_data = ImageOps.pad(Image.open(img_path).convert('RGB'), size=(self.opts.max_size, self.opts.max_size))
-        neg_data = ImageOps.pad(Image.open(neg_path).convert('RGB'), size=(self.opts.max_size, self.opts.max_size))
+        sk_data = self._load_padded_image(filepath)
+        img_data = self._load_padded_image(pos_img_path)
+        neg_data = self._load_padded_image(neg_img_path)
 
         sk_tensor  = self.transform(sk_data)
         img_tensor = self.transform(img_data)
@@ -90,6 +68,42 @@ class Sketchy(torch.utils.data.Dataset):
                 sk_data, img_data, neg_data)
         else:
             return (sk_tensor, img_tensor, neg_tensor, category, filename)
+
+    def _load_categories(self):
+        categories = os.listdir(os.path.join(self.opts.data_dir, "sketch"))
+        categories = [c for c in categories if c != ".ipynb_checkpoints"]
+        return sorted(categories)
+
+    def _select_categories(self, categories, mode, used_cat):
+        if self.opts.data_split > 0:
+            categories = categories.copy()
+            np.random.shuffle(categories)
+            if used_cat is None:
+                split_idx = int(len(categories) * self.opts.data_split)
+                return categories[:split_idx]
+            return sorted(list(set(categories) - set(used_cat)))
+
+        if mode == "train":
+            return sorted(list(set(categories) - set(unseen_classes)))
+        return unseen_classes
+
+    def _build_index(self, categories):
+        sketch_paths = []
+        photo_paths = {}
+        for category in categories:
+            sketch_paths.extend(
+                glob.glob(os.path.join(self.opts.data_dir, "sketch", category, "*.png"))
+            )
+            photo_paths[category] = glob.glob(
+                os.path.join(self.opts.data_dir, "photo", category, "*.jpg")
+            )
+        return sketch_paths, photo_paths
+
+    def _load_padded_image(self, path):
+        return ImageOps.pad(
+            Image.open(path).convert("RGB"),
+            size=(self.opts.max_size, self.opts.max_size),
+        )
 
     @staticmethod
     def data_transform(opts):

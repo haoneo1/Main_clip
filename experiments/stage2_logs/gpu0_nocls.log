@@ -1,0 +1,8 @@
+
+[2026-05-17 13:45:13] CMD: CUDA_VISIBLE_DEVICES=0 conda run -n pyenv python experiments/train_finetune.py --exp_name stage2_gpu0_nocls --max_epochs 60 --early_stop_patience 12 --batch_size 64 --use_clip_cls False --lambda_cls 0.0 --use_sigreg True --lambda_sigreg 0.1 --clip_LN_lr 2e-6 --prompt_lr 5e-5 --n_prompts 3 --cls_tau 0.07
+Traceback (most recent call last):
+  File "/home/mig/Documents/SBIR/Main_clip/experiments/train_finetune.py", line 9, in <module>
+    from src.model_finetune import FinetuneModel
+ModuleNotFoundError: No module named 'src'
+
+ERROR conda.cli.main_run:execute(127): `conda run python experiments/train_finetune.py --exp_name stage2_gpu0_nocls --max_epochs 60 --early_stop_patience 12 --batch_size 64 --use_clip_cls False --lambda_cls 0.0 --use_sigreg True --lambda_sigreg 0.1 --clip_LN_lr 2e-6 --prompt_lr 5e-5 --n_prompts 3 --cls_tau 0.07` failed. (See above for error)

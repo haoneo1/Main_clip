@@ -22,6 +22,10 @@ class FinetuneModel(BasePromptModel):
         self.lambda_cls = self.opts.lambda_cls
         self.cls_tau = self.opts.cls_tau
         self.use_clip_logit_scale = self.opts.use_clip_logit_scale
+        self.use_sigreg = getattr(self.opts, "use_sigreg", False)
+        self.lambda_sigreg = getattr(self.opts, "lambda_sigreg", 0.0)
+        self.sigreg_gamma = getattr(self.opts, "sigreg_gamma", 1.0)
+        self.sigreg_eps = getattr(self.opts, "sigreg_eps", 1e-4)
 
         self.seen_class_names = [str(x) for x in self.opts.seen_class_names]
 
@@ -141,6 +145,29 @@ class FinetuneModel(BasePromptModel):
         acc = (logits.argmax(dim=1) == labels).float().mean()
         return loss, logits, acc
 
+    def _sigreg_loss(self, feat):
+        feat = F.normalize(feat, dim=-1)
+        feat_centered = feat - feat.mean(dim=0, keepdim=True)
+
+        std = torch.sqrt(feat_centered.var(dim=0, unbiased=False) + self.sigreg_eps)
+        var_loss = F.relu(self.sigreg_gamma - std).mean()
+
+        if feat_centered.shape[0] <= 1:
+            cov_loss = torch.zeros((), device=feat.device, dtype=feat.dtype)
+        else:
+            cov = (feat_centered.t() @ feat_centered) / (feat_centered.shape[0] - 1)
+            diag = torch.eye(cov.shape[0], device=cov.device, dtype=torch.bool)
+            cov_loss = cov.masked_select(~diag).pow(2).mean()
+
+        return var_loss + cov_loss, var_loss, cov_loss
+
+    def _encode_triplet_batch(self, batch):
+        sk_tensor, img_tensor, neg_tensor, category = batch[:4]
+        img_feat = self.forward(img_tensor, dtype="image")
+        sk_feat = self.forward(sk_tensor, dtype="sketch")
+        neg_feat = self.forward(neg_tensor, dtype="image")
+        return sk_feat, img_feat, neg_feat, category
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             [
@@ -151,16 +178,12 @@ class FinetuneModel(BasePromptModel):
         return optimizer
 
     def training_step(self, batch, batch_idx):
-        sk_tensor, img_tensor, neg_tensor, category = batch[:4]
-
-        img_feat = self.forward(img_tensor, dtype="image")
-        sk_feat = self.forward(sk_tensor, dtype="sketch")
-        neg_feat = self.forward(neg_tensor, dtype="image")
+        sk_feat, img_feat, neg_feat, category = self._encode_triplet_batch(batch)
 
         triplet_loss = self.loss_fn(sk_feat, img_feat, neg_feat)
         total_loss = triplet_loss
 
-        self.log("train_triplet", triplet_loss, on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_triplet", triplet_loss, on_step=False, on_epoch=True, prog_bar=False)
 
         if self.use_clip_cls:
             labels = self._category_to_label_tensor(category)
@@ -171,11 +194,17 @@ class FinetuneModel(BasePromptModel):
             cls_loss = sk_cls_loss + img_cls_loss
             total_loss = triplet_loss + self.lambda_cls * cls_loss
 
-            self.log("train_cls_sk", sk_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_cls_img", img_cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_cls_total", cls_loss, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_acc_sk", sk_acc, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_acc_img", img_acc, on_step=True, on_epoch=True, prog_bar=False)
+            cls_acc = 0.5 * (sk_acc + img_acc)
+            self.log("train_cls_total", cls_loss, on_step=False, on_epoch=True, prog_bar=False)
+            self.log("train_cls_acc", cls_acc, on_step=False, on_epoch=True, prog_bar=False)
+
+        if self.use_sigreg and self.lambda_sigreg > 0.0:
+            sk_sigreg, _, _ = self._sigreg_loss(sk_feat)
+            img_sigreg, _, _ = self._sigreg_loss(img_feat)
+            sigreg_loss = 0.5 * (sk_sigreg + img_sigreg)
+            total_loss = total_loss + self.lambda_sigreg * sigreg_loss
+
+            self.log("train_sigreg", sigreg_loss, on_step=False, on_epoch=True, prog_bar=False)
 
         self.log("train_loss", total_loss, on_step=True, on_epoch=True, prog_bar=True)
         return total_loss
@@ -186,11 +215,7 @@ class FinetuneModel(BasePromptModel):
         self._val_categories = []
 
     def validation_step(self, batch, batch_idx):
-        sk_tensor, img_tensor, neg_tensor, category = batch[:4]
-
-        img_feat = self.forward(img_tensor, dtype="image")
-        sk_feat = self.forward(sk_tensor, dtype="sketch")
-        neg_feat = self.forward(neg_tensor, dtype="image")
+        sk_feat, img_feat, neg_feat, category = self._encode_triplet_batch(batch)
 
         loss = self.loss_fn(sk_feat, img_feat, neg_feat)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
@@ -227,8 +252,6 @@ class FinetuneModel(BasePromptModel):
 
         mAP = ap.mean()
         self.log("mAP", mAP, on_step=False, on_epoch=True, prog_bar=True)
-        self.log("top10", mAP, on_step=False, on_epoch=True, prog_bar=False)
-
         if self.global_step > 0:
             self.best_metric = max(self.best_metric, float(mAP.item()))
 

@@ -39,6 +39,11 @@ class PretrainModel(BasePromptModel):
 
         return loss, z1, z2, pred_z2
 
+    def _log_feature_norms(self, z1, z2, pred_z2):
+        self.log("train_img_norm_v1", z1.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_img_norm_v2", z2.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self.log("train_pred_norm", pred_z2.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
             [
@@ -57,9 +62,7 @@ class PretrainModel(BasePromptModel):
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log("train_jepa_pred", loss.detach(), on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_img_norm_v1", z1.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_img_norm_v2", z2.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
-        self.log("train_pred_norm", pred_z2.norm(dim=1).mean().detach(), on_step=True, on_epoch=True, prog_bar=False)
+        self._log_feature_norms(z1, z2, pred_z2)
 
         return loss
     

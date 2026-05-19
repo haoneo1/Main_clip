@@ -10,12 +10,16 @@ def freeze_model(m):
     m.requires_grad_(False)
 
 
-def freeze_all_but_bn(m):
+def freeze_all_but_layernorm(m):
     if not isinstance(m, torch.nn.LayerNorm):
         if hasattr(m, "weight") and m.weight is not None:
             m.weight.requires_grad_(False)
         if hasattr(m, "bias") and m.bias is not None:
             m.bias.requires_grad_(False)
+
+
+# Backward-compatible alias for older imports/usages.
+freeze_all_but_bn = freeze_all_but_layernorm
 
 
 def _to_key_list(category):
@@ -52,7 +56,7 @@ class BasePromptModel(pl.LightningModule):
         self.opts = opts
 
         self.clip, _ = clip.load("ViT-B/32", device=self.device)
-        self.clip.apply(freeze_all_but_bn)
+        self.clip.apply(freeze_all_but_layernorm)
         self.clip.train()
 
         self.sk_prompt = nn.Parameter(torch.randn(self.opts.n_prompts, self.opts.prompt_dim))
@@ -78,8 +82,9 @@ class BasePromptModel(pl.LightningModule):
     def forward(self, data, dtype="image"):
         if dtype == "image":
             return self.encode_image_branch(data)
-        else:
+        if dtype == "sketch":
             return self.encode_sketch_branch(data)
+        raise ValueError(f"Unsupported dtype='{dtype}'. Expected 'image' or 'sketch'.")
 
     def init_sk_prompt_from_img_prompt(self):
         with torch.no_grad():

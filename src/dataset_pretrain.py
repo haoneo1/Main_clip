@@ -44,33 +44,10 @@ class PhotoOnlyJEPADataset(torch.utils.data.Dataset):
         self.transform_view2 = transform_view2 if transform_view2 is not None else transform_view1
         self.return_orig = return_orig
 
-        # 读取所有类别（从 sketch 目录读类别名，与你原来的 retrieval 保持一致）
-        self.all_categories = os.listdir(os.path.join(self.opts.data_dir, 'sketch'))
-        if '.ipynb_checkpoints' in self.all_categories:
-            self.all_categories.remove('.ipynb_checkpoints')
+        self.all_categories = self._load_categories()
+        self.all_categories = self._select_categories(self.all_categories, mode)
 
-        # 类别划分逻辑与原始 Sketchy 尽量保持一致
-        if self.opts.data_split > 0:
-            np.random.shuffle(self.all_categories)
-            split_idx = int(len(self.all_categories) * self.opts.data_split)
-            if mode == 'train':
-                self.all_categories = self.all_categories[:split_idx]
-            else:
-                self.all_categories = self.all_categories[split_idx:]
-        else:
-            # 严格 ZS：train 只用 base classes；val/test 才用 unseen
-            if mode == 'train':
-                self.all_categories = list(set(self.all_categories) - set(unseen_classes))
-            else:
-                self.all_categories = unseen_classes
-
-        self.all_photos_path = []
-        for category in self.all_categories:
-            self.all_photos_path.extend(
-                glob.glob(os.path.join(self.opts.data_dir, 'photo', category, '*.jpg'))
-            )
-
-        self.all_photos_path = sorted(self.all_photos_path)
+        self.all_photos_path = self._collect_photo_paths(self.all_categories)
 
     def __len__(self):
         return len(self.all_photos_path)
@@ -93,6 +70,30 @@ class PhotoOnlyJEPADataset(torch.utils.data.Dataset):
             return img_view1, img_view2, category, filename, img_data
         else:
             return img_view1, img_view2, category, filename
+
+    def _load_categories(self):
+        categories = os.listdir(os.path.join(self.opts.data_dir, "sketch"))
+        categories = [c for c in categories if c != ".ipynb_checkpoints"]
+        return sorted(categories)
+
+    def _select_categories(self, categories, mode):
+        if self.opts.data_split > 0:
+            categories = categories.copy()
+            np.random.shuffle(categories)
+            split_idx = int(len(categories) * self.opts.data_split)
+            if mode == "train":
+                return categories[:split_idx]
+            return categories[split_idx:]
+
+        if mode == "train":
+            return sorted(list(set(categories) - set(unseen_classes)))
+        return unseen_classes
+
+    def _collect_photo_paths(self, categories):
+        all_paths = []
+        for category in categories:
+            all_paths.extend(glob.glob(os.path.join(self.opts.data_dir, "photo", category, "*.jpg")))
+        return sorted(all_paths)
 
     @staticmethod
     def data_transform(opts):

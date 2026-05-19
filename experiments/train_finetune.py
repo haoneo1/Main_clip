@@ -11,54 +11,21 @@ from src.dataset_finetune import Sketchy
 from experiments.options import opts
 
 
-if __name__ == '__main__':
-    # =========================
-    # 0) Performance hint for Tensor Cores
-    # =========================
-    torch.set_float32_matmul_precision("high")
-
-    # 你现在想重新开一段新的 fine-tune
-    opts.max_epochs = 100
-
-    # =========================
-    # 1) Seed
-    # =========================
-    pl.seed_everything(opts.seed, workers=True)
-
-    # =========================
-    # 2) Stage / experiment name
-    # =========================
-    opts.train_stage = "triplet_finetune"
-    opts.pretrain_ckpt = '/home/mig/Documents/SBIR_Data/saved_models/SSL_same_class_jepa_pretrain/last.ckpt'
-
-    if not opts.exp_name.endswith("_finetune"):
-        opts.exp_name = f"{opts.exp_name}_finetune"
-
-    # =========================
-    # 2.1) Save root / save dir
-    # =========================
-    opts.save_root = "/home/mig/Documents/SBIR_Data/saved_models"
-    save_dir = os.path.join(opts.save_root, opts.exp_name)
-    os.makedirs(save_dir, exist_ok=True)
-
-    # =========================
-    # 3) Dataset / DataLoader
-    # =========================
+def build_dataloaders():
     dataset_transforms = Sketchy.data_transform(opts)
 
     train_dataset = Sketchy(
         opts,
         dataset_transforms,
-        mode='train',
-        return_orig=False
+        mode="train",
+        return_orig=False,
     )
-
     val_dataset = Sketchy(
         opts,
         dataset_transforms,
-        mode='val',
+        mode="val",
         used_cat=train_dataset.all_categories,
-        return_orig=False
+        return_orig=False,
     )
 
     train_loader = DataLoader(
@@ -70,7 +37,6 @@ if __name__ == '__main__':
         drop_last=True,
         persistent_workers=(opts.workers > 0),
     )
-
     val_loader = DataLoader(
         dataset=val_dataset,
         batch_size=opts.batch_size,
@@ -80,6 +46,56 @@ if __name__ == '__main__':
         drop_last=False,
         persistent_workers=(opts.workers > 0),
     )
+    return train_dataset, val_dataset, train_loader, val_loader
+
+
+def maybe_load_finetune_weights(model, save_dir):
+    finetune_ckpt = os.path.join(save_dir, "last.ckpt")
+    if not os.path.exists(finetune_ckpt):
+        print("[FINETUNE] no finetune checkpoint found, training from scratch (without pretrain ckpt).")
+        return False
+
+    print(f"[FINETUNE] loading finetune model weights from: {finetune_ckpt}")
+    ckpt = torch.load(finetune_ckpt, map_location="cpu")
+    state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    print("[FINETUNE] missing keys:", missing)
+    print("[FINETUNE] unexpected keys:", unexpected)
+    return True
+
+
+def maybe_load_init_weights(model):
+    init_ckpt = getattr(opts, "finetune_init_ckpt", "")
+    if not init_ckpt:
+        return False
+    if not os.path.exists(init_ckpt):
+        print(f"[FINETUNE] finetune_init_ckpt not found: {init_ckpt}")
+        return False
+
+    print(f"[FINETUNE] loading init model weights from pretrain ckpt: {init_ckpt}")
+    ckpt = torch.load(init_ckpt, map_location="cpu")
+    state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    print("[FINETUNE] init missing keys:", missing)
+    print("[FINETUNE] init unexpected keys:", unexpected)
+    return True
+
+
+def main():
+    torch.set_float32_matmul_precision("high")
+    pl.seed_everything(opts.seed, workers=True)
+
+    opts.train_stage = "triplet_finetune"
+    opts.pretrain_ckpt = None
+
+    if not opts.exp_name.endswith("_finetune"):
+        opts.exp_name = f"{opts.exp_name}_finetune"
+
+    opts.save_root = "/home/mig/Documents/SBIR_Data/saved_models"
+    save_dir = os.path.join(opts.save_root, opts.exp_name)
+    os.makedirs(save_dir, exist_ok=True)
+
+    train_dataset, val_dataset, train_loader, val_loader = build_dataloaders()
 
     print(f"[FINETUNE] train samples: {len(train_dataset)}")
     print(f"[FINETUNE] val samples: {len(val_dataset)}")
@@ -88,33 +104,25 @@ if __name__ == '__main__':
     print(f"[FINETUNE] val classes: {len(val_dataset.all_categories)}")
     print(f"[FINETUNE] first 10 val classes: {val_dataset.all_categories[:10]}")
 
-    # =========================
-    # 4) Logger
-    # =========================
-    logger = TensorBoardLogger('tb_logs', name=opts.exp_name)
+    logger = TensorBoardLogger("tb_logs", name=opts.exp_name)
 
-    # =========================
-    # 5) Checkpoint / EarlyStopping
-    # =========================
     checkpoint_callback = ModelCheckpoint(
-        monitor='mAP',
+        monitor="mAP",
         dirpath=save_dir,
-        filename='best-{epoch:02d}-{mAP:.4f}',
-        mode='max',
+        filename="best-{epoch:02d}-{mAP:.4f}",
+        mode="max",
         save_top_k=1,
-        save_last=True,
+        save_last=opts.save_last_ckpt,
+        save_weights_only=True,
     )
 
     early_stop = EarlyStopping(
-        monitor='mAP',
-        mode='max',
-        patience=100,
+        monitor="mAP",
+        mode="max",
+        patience=opts.early_stop_patience,
         min_delta=1e-4,
     )
 
-    # =========================
-    # 6) Trainer
-    # =========================
     trainer = Trainer(
         accelerator="gpu",
         devices=1,
@@ -128,50 +136,14 @@ if __name__ == '__main__':
         num_sanity_val_steps=0,
     )
 
-    # =========================
-    # 7) Build model
-    # =========================
     opts.seen_class_names = train_dataset.all_categories
     model = FinetuneModel(opts)
-
-    # =========================
-    # 8) Load weights only
-    # 优先级：
-    #   A. 如果已有 fine-tune 的 last.ckpt -> 只加载模型权重
-    #   B. 否则加载 JEPA pretrain 权重
-    #   C. 否则从头开始
-    # =========================
-    finetune_ckpt = os.path.join(save_dir, 'last.ckpt')
-
-    if os.path.exists(finetune_ckpt):
-        print(f"[FINETUNE] loading finetune model weights from: {finetune_ckpt}")
-        ckpt = torch.load(finetune_ckpt, map_location='cpu')
-        state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
-
-        missing, unexpected = model.load_state_dict(state_dict, strict=False)
-        print("[FINETUNE] missing keys:", missing)
-        print("[FINETUNE] unexpected keys:", unexpected)
-
-    else:
-        pretrain_ckpt = opts.pretrain_ckpt
-
-        if pretrain_ckpt is not None and os.path.exists(pretrain_ckpt):
-            print(f"[FINETUNE] loading JEPA pretrain weights from: {pretrain_ckpt}")
-            ckpt = torch.load(pretrain_ckpt, map_location='cpu')
-            state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
-
-            missing, unexpected = model.load_state_dict(state_dict, strict=False)
-            print("[FINETUNE] missing keys:", missing)
-            print("[FINETUNE] unexpected keys:", unexpected)
-
-            model.init_sk_prompt_from_img_prompt()
-            print("[FINETUNE] initialized sk_prompt from img_prompt")
-        else:
-            print("[FINETUNE] no valid checkpoint found, training from scratch.")
-
-    # =========================
-    # 9) Fit
-    # 注意：这里不要再传 ckpt_path
-    # =========================
-    print('[FINETUNE] beginning a NEW fine-tuning stage from loaded weights...')
+    resumed = maybe_load_finetune_weights(model, save_dir)
+    if not resumed:
+        maybe_load_init_weights(model)
+    print("[FINETUNE] beginning a NEW fine-tuning stage from loaded weights...")
     trainer.fit(model, train_loader, val_loader)
+
+
+if __name__ == "__main__":
+    main()
